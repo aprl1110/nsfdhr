@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HR Calendar</title>
+    <link rel="stylesheet" href="styles.css?v=logo-root-1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="home-page page-panel" data-page-panel="home">
+        <div id="pullRefreshIndicator" class="pull-refresh-indicator" aria-hidden="true">새로고침</div>
+        <div class="admin-panel">
+          <button id="adminLoginBtn" class="text-button" type="button">관리자 로그인</button>
+          <label class="plan-upload-button admin-only hidden-upload">
+            일일운영계획서 등록
+            <input id="dailyPlanInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx" />
+          </label>
+          <button id="dailyPlanListBtn" class="text-button admin-only" type="button">계획서 목록</button>
+          <button id="employeeManageBtn" class="text-button admin-only" type="button">직원관리</button>
+          <button id="adminLogoutBtn" class="text-button" type="button" hidden>로그아웃</button>
+          <div id="dailyPlanUploadProgress" class="upload-progress admin-only" hidden>
+            <div class="upload-progress-row">
+              <span id="dailyPlanUploadText">업로드 준비 중</span>
+              <strong id="dailyPlanUploadPercent">0%</strong>
+            </div>
+            <div class="upload-progress-track">
+              <span id="dailyPlanUploadBar"></span>
+            </div>
+          </div>
+        </div>
+        <section class="home-hero">
+          <img class="home-title-image" src="ns-fd-logo-clean.png?v=logo-root-1" alt="NS홈쇼핑 FD" />
+          <div class="home-actions">
+            <button id="homeRosterBtn" class="home-action-button" type="button">근무표</button>
+            <button id="homeCalendarBtn" class="home-action-button primary" type="button">캘린더</button>
+            <button id="homeVacationBtn" class="home-action-button" type="button">휴가</button>
+          </div>
+        </section>
+      </main>
+
+      <aside class="sidebar page-panel" data-page-panel="calendar roster vacation" aria-label="직원 목록" hidden>
+        <button id="homeLogoBtn" class="brand home-logo-button" type="button" aria-label="홈으로 이동">
+          <img class="sidebar-logo-image" src="ns-fd-logo-clean.png?v=logo-root-1" alt="NS홈쇼핑 FD" />
+        </button>
+
+        <nav class="side-nav" aria-label="페이지">
+          <button id="calendarPageBtn" class="nav-button" type="button">캘린더</button>
+          <button id="rosterPageBtn" class="nav-button" type="button">근무표</button>
+          <button id="vacationPageBtn" class="nav-button" type="button">휴가</button>
+        </nav>
+
+        <section class="panel compact-panel" hidden>
+          <div class="panel-title-row">
+            <h2>오늘 현황</h2>
+            <span id="todayLabel"></span>
+          </div>
+          <div class="status-grid">
+            <div>
+              <strong id="workingCount">0</strong>
+              <span>근무</span>
+            </div>
+            <div>
+              <strong id="awayCount">0</strong>
+              <span>부재</span>
+            </div>
+            <div>
+              <strong id="pendingCount">0</strong>
+              <span>승인대기</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel employee-panel" hidden>
+          <div class="panel-title-row">
+            <h2>직원</h2>
+            <button id="showAllBtn" class="text-button" type="button">전체</button>
+          </div>
+          <div id="employeeList" class="employee-list"></div>
+        </section>
+      </aside>
+
+      <main class="main calendar-page page-panel" data-page-panel="calendar" hidden>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">근태 · 휴가 · 일정</p>
+            <h2>월간 캘린더</h2>
+          </div>
+          <div class="topbar-actions">
+            <button id="prevMonth" class="icon-button" type="button" aria-label="이전 달">
+              <span aria-hidden="true">‹</span>
+            </button>
+            <button id="todayBtn" class="secondary-button" type="button">오늘</button>
+            <button id="nextMonth" class="icon-button" type="button" aria-label="다음 달">
+              <span aria-hidden="true">›</span>
+            </button>
+            <button id="editRosterBtn" class="secondary-button admin-only" type="button">근무표 편집</button>
+            <button id="newEventBtn" class="primary-button admin-only" type="button">일정 추가</button>
+          </div>
+        </header>
+
+        <section class="calendar-card" aria-label="월간 캘린더">
+          <div class="calendar-toolbar">
+            <div>
+              <h3 id="monthTitle"></h3>
+              <p id="filterLabel">전체 직원 일정</p>
+            </div>
+            <div class="legend">
+              <span><i class="dot annual"></i>연차</span>
+              <span><i class="dot monthly"></i>월차</span>
+              <span><i class="dot substitute"></i>대휴</span>
+              <span><i class="dot sick"></i>병가</span>
+              <span><i class="dot holiday-dot"></i>공휴일</span>
+            </div>
+          </div>
+          <div class="weekday-row" aria-hidden="true">
+            <span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+      </main>
+
+      <aside class="details calendar-page page-panel" data-page-panel="calendar" aria-label="선택한 날짜 상세">
+        <section class="panel date-panel">
+          <div class="panel-title-row">
+            <h2 id="selectedDateTitle">날짜 선택</h2>
+            <span id="selectedDateBadge"></span>
+          </div>
+          <div id="dayEvents" class="day-events empty-state"></div>
+        </section>
+
+        <section class="panel request-panel" hidden>
+          <div class="panel-title-row">
+            <h2>휴가 신청</h2>
+            <button id="toggleRequestBtn" class="toggle-button" type="button" aria-expanded="false" aria-controls="requestForm">
+              <span aria-hidden="true">+</span>
+            </button>
+          </div>
+          <form id="requestForm" class="request-form collapsed">
+            <label>
+              직원
+              <select id="employeeInput" required></select>
+            </label>
+            <label>
+              유형
+              <select id="typeInput" required>
+                <option value="annual">연차</option>
+                <option value="monthly">월차</option>
+                <option value="substitute">대휴</option>
+                <option value="sick">병가</option>
+              </select>
+            </label>
+            <label>
+              날짜
+              <input id="dateInput" type="date" required />
+            </label>
+            <label>
+              메모
+              <input id="memoInput" type="text" placeholder="예: 오전 반차" />
+            </label>
+            <button class="primary-button full" type="submit">등록</button>
+          </form>
+        </section>
+      </aside>
+
+    <template id="eventTemplate">
+      <button class="event-pill" type="button">
+        <span class="event-dot"></span>
+        <span class="event-text"></span>
+      </button>
+    </template>
+
+    <dialog id="shiftDialog" class="shift-dialog">
+      <form id="shiftSettingsForm" method="dialog">
+        <div class="dialog-header">
+          <div>
+            <p>근무자 설정</p>
+            <h2 id="shiftDialogTitle"></h2>
+          </div>
+          <button id="closeShiftDialog" class="icon-button" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <label class="shift-date-field">
+          날짜
+          <span class="shift-date-controls">
+            <input id="shiftSettingsDate" type="date" />
+            <button id="applyShiftDate" class="secondary-button" type="button">적용</button>
+          </span>
+        </label>
+        <div id="shiftSettingsRows" class="shift-settings-rows"></div>
+        <div class="dialog-actions">
+          <button class="secondary-button" type="button" id="cancelShiftSettings">취소</button>
+          <button class="primary-button" type="submit">저장</button>
+        </div>
+      </form>
+    </dialog>
+
+    <main id="rosterDialog" class="main roster-dialog roster-page page-panel" data-page-panel="roster" hidden>
+      <form id="rosterForm">
+        <div class="dialog-header">
+          <div>
+            <p>근무표</p>
+            <h2 id="rosterDialogTitle"></h2>
+          </div>
+          <button id="closeRosterDialog" class="icon-button" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div class="roster-tools">
+          <button id="prevRosterMonth" class="secondary-button" type="button">이전 달</button>
+          <button id="nextRosterMonth" class="secondary-button" type="button">다음 달</button>
+          <label class="file-import-button admin-only">
+            엑셀 반영
+            <input id="importAnnualRoster" type="file" accept=".xls,.xlsx,.html,.htm" />
+          </label>
+        </div>
+        <div class="roster-table-wrap">
+          <table class="roster-table">
+            <thead id="rosterTableHead"></thead>
+            <tbody id="rosterTableBody"></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions">
+          <button class="secondary-button admin-only" type="button" id="cancelRosterEdit">취소</button>
+          <button class="primary-button admin-only" type="submit">저장</button>
+        </div>
+      </form>
+    </main>
+
+    <main class="main vacation-page page-panel" data-page-panel="vacation" hidden>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">연차 · 대체휴무</p>
+          <h2>휴가 관리</h2>
+        </div>
+      </header>
+
+      <section class="vacation-layout" aria-label="직원별 휴가 현황">
+        <aside class="vacation-employees">
+          <h3>직원</h3>
+          <div id="vacationEmployeeButtons" class="vacation-employee-list"></div>
+        </aside>
+        <section id="vacationDetail" class="vacation-detail"></section>
+      </section>
+    </main>
+    </div>
+
+    <dialog id="dailyPlanDialog" class="daily-plan-dialog">
+      <div class="daily-plan-card">
+        <div class="dialog-header">
+          <div>
+            <p>일일운영계획서</p>
+            <h2 id="dailyPlanTitle">오늘의 운영계획서</h2>
+            <span id="dailyPlanCounter" class="daily-plan-counter"></span>
+          </div>
+          <button id="closeDailyPlanDialog" class="icon-button" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div id="dailyPlanPreview" class="daily-plan-preview"></div>
+        <div class="dialog-actions">
+          <button id="prevDailyPlan" class="icon-button" type="button" aria-label="이전 운영계획서">
+            <span aria-hidden="true">&lt;</span>
+          </button>
+          <button id="nextDailyPlan" class="icon-button" type="button" aria-label="다음 운영계획서">
+            <span aria-hidden="true">&gt;</span>
+          </button>
+          <a id="dailyPlanDownload" class="secondary-button" href="#" download>파일 열기</a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="dailyPlanListDialog" class="daily-plan-list-dialog">
+      <div class="daily-plan-list-card">
+        <div class="dialog-header">
+          <div>
+            <p>관리자</p>
+            <h2>계획서 목록</h2>
+          </div>
+          <button id="closeDailyPlanListDialog" class="icon-button" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div id="dailyPlanList" class="daily-plan-list"></div>
+      </div>
+    </dialog>
+
+    <dialog id="employeeManageDialog" class="employee-manage-dialog">
+      <form id="employeeManageForm" class="employee-manage-card" method="dialog">
+        <div class="dialog-header">
+          <div>
+            <p>관리자</p>
+            <h2>직원관리</h2>
+          </div>
+          <button id="closeEmployeeManageDialog" class="icon-button" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div id="employeeManageList" class="employee-manage-list"></div>
+
+        <div class="employee-hire-box">
+          <h3>입사 처리</h3>
+          <div class="employee-hire-fields">
+            <label>
+              이름
+              <input id="newEmployeeName" type="text" placeholder="직원 이름" />
+            </label>
+            <label>
+              입사 날짜
+              <input id="newEmployeeHireDate" type="date" />
+            </label>
+            <button id="addEmployeeBtn" class="primary-button" type="button">입사 등록</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="app.js?v=logo-root-1"></script>
+  </body>
+</html>

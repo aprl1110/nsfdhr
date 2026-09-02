@@ -1,0 +1,12 @@
+{
+  "name": "nsfdhr",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js && node --check netlify/functions/hr-data.js && node --check netlify/functions/daily-plan-file.js"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
