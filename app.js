@@ -1690,6 +1690,19 @@ function getNextEmployeeId() {
   return `e${String(maxNumber + 1).padStart(2, "0")}`;
 }
 
+function sortEmployeesWithInactiveLast(employeeList) {
+  return [...employeeList].sort((a, b) => {
+    const activeScore = Number(isEmployeeActive(b)) - Number(isEmployeeActive(a));
+    if (activeScore !== 0) return activeScore;
+    return a.name.localeCompare(b.name, "ko");
+  });
+}
+
+function getVacationVisibleEmployees() {
+  const visibleEmployees = isAdmin ? employees : employees.filter(isEmployeeActive);
+  return sortEmployeesWithInactiveLast(visibleEmployees);
+}
+
 function saveEmployees() {
   employees = normalizeEmployees(employees);
   saveStoredData("hrEmployees", employees);
@@ -1952,8 +1965,11 @@ function renderSubstituteEarnedDateButtons(holidayWorks, substituteUsesByEarnedD
 function renderVacationPage() {
   if (!vacationEmployeeButtons || !vacationDetail) return;
 
-  const visibleEmployees = employees.length ? employees : [];
-  if (!selectedVacationEmployeeId || !getEmployee(selectedVacationEmployeeId)) {
+  const visibleEmployees = getVacationVisibleEmployees();
+  if (
+    !selectedVacationEmployeeId ||
+    !visibleEmployees.some((employee) => employee.id === selectedVacationEmployeeId)
+  ) {
     selectedVacationEmployeeId = visibleEmployees[0]?.id || "";
   }
 
@@ -2109,7 +2125,7 @@ function renderEmployeeManagement() {
   if (!employeeManageList) return;
 
   employeeManageList.innerHTML = "";
-  employees.forEach((employee) => {
+  sortEmployeesWithInactiveLast(employees).forEach((employee) => {
     const item = document.createElement("div");
     item.className = `employee-manage-item${isEmployeeActive(employee) ? "" : " inactive"}`;
     item.innerHTML = `
@@ -2133,7 +2149,6 @@ function renderEmployeeManagement() {
       <div class="employee-manage-actions">
         <button class="secondary-button" type="button" data-action="save">저장</button>
         <button class="danger-button" type="button" data-action="exit">퇴사 처리</button>
-        <button class="secondary-button" type="button" data-action="hire">입사 처리</button>
       </div>
     `;
 
@@ -2146,12 +2161,6 @@ function renderEmployeeManagement() {
     item.querySelector('[data-action="exit"]')?.addEventListener("click", () => {
       employee.hireDate = item.querySelector('[data-field="hireDate"]')?.value || employee.hireDate || "";
       employee.exitDate = item.querySelector('[data-field="exitDate"]')?.value || toDateKey(new Date());
-      saveEmployees();
-    });
-
-    item.querySelector('[data-action="hire"]')?.addEventListener("click", () => {
-      employee.hireDate = item.querySelector('[data-field="hireDate"]')?.value || toDateKey(new Date());
-      employee.exitDate = "";
       saveEmployees();
     });
 
