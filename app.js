@@ -115,6 +115,7 @@ function normalizeEmployees(employeeList = []) {
       color: employee.color || employeeColors[index % employeeColors.length],
       hireDate: employee.hireDate || "",
       exitDate: employee.exitDate || "",
+      order: Number.isFinite(Number(employee.order)) ? Number(employee.order) : index,
       annualLeaveTotal: Number.isFinite(Number(employee.annualLeaveTotal))
         ? Number(employee.annualLeaveTotal)
         : defaultAnnualLeaveTotal,
@@ -1694,8 +1695,37 @@ function sortEmployeesWithInactiveLast(employeeList) {
   return [...employeeList].sort((a, b) => {
     const activeScore = Number(isEmployeeActive(b)) - Number(isEmployeeActive(a));
     if (activeScore !== 0) return activeScore;
+    const orderScore = (Number(a.order) || 0) - (Number(b.order) || 0);
+    if (orderScore !== 0) return orderScore;
     return a.name.localeCompare(b.name, "ko");
   });
+}
+
+function normalizeEmployeeOrder() {
+  const activeEmployees = sortEmployeesWithInactiveLast(employees.filter(isEmployeeActive));
+  const inactiveEmployees = sortEmployeesWithInactiveLast(employees.filter((employee) => !isEmployeeActive(employee)));
+  employees = [...activeEmployees, ...inactiveEmployees].map((employee, index) => ({
+    ...employee,
+    order: index,
+  }));
+}
+
+function moveEmployeeOrder(employeeId, direction) {
+  if (!requireAdmin("직원 순서 변경은 관리자만 사용할 수 있습니다.")) return;
+  normalizeEmployeeOrder();
+  const orderedEmployees = sortEmployeesWithInactiveLast(employees);
+  const currentIndex = orderedEmployees.findIndex((employee) => employee.id === employeeId);
+  if (currentIndex < 0) return;
+
+  const currentEmployee = orderedEmployees[currentIndex];
+  const targetIndex = currentIndex + direction;
+  const targetEmployee = orderedEmployees[targetIndex];
+  if (!targetEmployee || isEmployeeActive(currentEmployee) !== isEmployeeActive(targetEmployee)) return;
+
+  const currentOrder = currentEmployee.order;
+  currentEmployee.order = targetEmployee.order;
+  targetEmployee.order = currentOrder;
+  saveEmployees();
 }
 
 function getVacationVisibleEmployees() {
@@ -1705,6 +1735,7 @@ function getVacationVisibleEmployees() {
 
 function saveEmployees() {
   employees = normalizeEmployees(employees);
+  normalizeEmployeeOrder();
   saveStoredData("hrEmployees", employees);
   render();
   if (employeeManageDialog?.open) {
@@ -2126,6 +2157,12 @@ function renderEmployeeManagement() {
 
   employeeManageList.innerHTML = "";
   sortEmployeesWithInactiveLast(employees).forEach((employee) => {
+    const orderedEmployees = sortEmployeesWithInactiveLast(employees);
+    const employeeIndex = orderedEmployees.findIndex((orderedEmployee) => orderedEmployee.id === employee.id);
+    const prevEmployee = orderedEmployees[employeeIndex - 1];
+    const nextEmployee = orderedEmployees[employeeIndex + 1];
+    const canMoveUp = prevEmployee && isEmployeeActive(prevEmployee) === isEmployeeActive(employee);
+    const canMoveDown = nextEmployee && isEmployeeActive(nextEmployee) === isEmployeeActive(employee);
     const item = document.createElement("div");
     item.className = `employee-manage-item${isEmployeeActive(employee) ? "" : " inactive"}`;
     item.innerHTML = `
@@ -2147,10 +2184,20 @@ function renderEmployeeManagement() {
         </label>
       </div>
       <div class="employee-manage-actions">
+        <button class="secondary-button employee-order-button" type="button" data-action="up" ${canMoveUp ? "" : "disabled"}>위</button>
+        <button class="secondary-button employee-order-button" type="button" data-action="down" ${canMoveDown ? "" : "disabled"}>아래</button>
         <button class="secondary-button" type="button" data-action="save">저장</button>
         <button class="danger-button" type="button" data-action="exit">퇴사 처리</button>
       </div>
     `;
+
+    item.querySelector('[data-action="up"]')?.addEventListener("click", () => {
+      moveEmployeeOrder(employee.id, -1);
+    });
+
+    item.querySelector('[data-action="down"]')?.addEventListener("click", () => {
+      moveEmployeeOrder(employee.id, 1);
+    });
 
     item.querySelector('[data-action="save"]')?.addEventListener("click", () => {
       employee.hireDate = item.querySelector('[data-field="hireDate"]')?.value || "";
@@ -2194,6 +2241,7 @@ function addEmployee() {
       color: employeeColors[employees.length % employeeColors.length],
       hireDate: newEmployeeHireDate.value || toDateKey(new Date()),
       exitDate: "",
+      order: employees.length,
       annualLeaveTotal: defaultAnnualLeaveTotal,
     },
   ];

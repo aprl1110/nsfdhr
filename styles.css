@@ -1471,6 +1471,15 @@ button {
   justify-content: flex-end;
 }
 
+.employee-order-button {
+  min-width: 48px;
+}
+
+.employee-order-button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
 .employee-hire-box {
   padding-top: 12px;
   border-top: 1px solid var(--line);
