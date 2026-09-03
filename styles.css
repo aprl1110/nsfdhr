@@ -1172,7 +1172,7 @@ button {
 
 .vacation-stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 8px;
 }
 
@@ -1197,14 +1197,70 @@ button {
   font-size: 26px;
 }
 
+.vacation-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.vacation-summary-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 84px;
+  padding: 10px 11px;
+  border: 1px solid #d8e2df;
+  border-radius: 8px;
+  background: #f8fbf9;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vacation-summary-card:hover {
+  border-color: #b7cfcb;
+  background: var(--accent-soft);
+}
+
+.vacation-summary-card span {
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.vacation-summary-card small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.vacation-summary-lines {
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.vacation-summary-lines strong {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.substitute-summary-card {
+  min-height: 78px;
+}
+
 .vacation-admin-tools {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfa;
+}
+
+.vacation-admin-tools.compact {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  padding: 10px;
 }
 
 .vacation-admin-tools label {
@@ -1351,6 +1407,42 @@ button {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
+}
+
+.vacation-history-dialog {
+  width: min(760px, calc(100vw - 20px));
+  max-height: calc(100vh - 28px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--text);
+  box-shadow: 0 24px 70px rgba(23, 33, 43, 0.22);
+}
+
+.vacation-history-dialog::backdrop {
+  background: rgba(23, 33, 43, 0.42);
+}
+
+.vacation-history-card {
+  display: grid;
+  grid-template-rows: auto minmax(160px, 1fr);
+  gap: 14px;
+  max-height: calc(100vh - 28px);
+  padding: 18px;
+}
+
+.vacation-history-body {
+  display: grid;
+  gap: 14px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.vacation-popup-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
 }
 
 .shift-dialog::backdrop {
@@ -1821,14 +1913,16 @@ button {
 @media (max-width: 560px) {
   .daily-plan-dialog,
   .daily-plan-list-dialog,
-  .employee-manage-dialog {
+  .employee-manage-dialog,
+  .vacation-history-dialog {
     width: calc(100vw - 8px);
     max-height: calc(100vh - 8px);
   }
 
   .daily-plan-card,
   .daily-plan-list-card,
-  .employee-manage-card {
+  .employee-manage-card,
+  .vacation-history-card {
     max-height: calc(100vh - 8px);
     padding: 8px;
   }
@@ -1871,8 +1965,14 @@ button {
   .employee-list,
   .status-grid,
   .vacation-employee-list,
-  .vacation-stats {
+  .vacation-stats,
+  .vacation-summary-grid,
+  .vacation-popup-stats {
     grid-template-columns: 1fr;
+  }
+
+  .vacation-summary-card {
+    min-height: 104px;
   }
 
   .vacation-detail {

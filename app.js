@@ -119,6 +119,10 @@ function normalizeEmployees(employeeList = []) {
       annualLeaveTotal: Number.isFinite(Number(employee.annualLeaveTotal))
         ? Number(employee.annualLeaveTotal)
         : defaultAnnualLeaveTotal,
+      annualLeaveAdjustment: Number.isFinite(Number(employee.annualLeaveAdjustment))
+        ? Number(employee.annualLeaveAdjustment)
+        : 0,
+      annualLeaveAdjustments: normalizeNumberMap(employee.annualLeaveAdjustments),
       substituteEarnedDates: normalizeDateList(employee.substituteEarnedDates),
       substituteEarnedRemovedDates: normalizeDateList(employee.substituteEarnedRemovedDates),
     }))
@@ -148,6 +152,15 @@ function normalizeDateList(value) {
         .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey || "")),
     ),
   ).sort();
+}
+
+function normalizeNumberMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key, numberValue]) => /^\d{4}-\d{2}-\d{2}$/.test(key) && Number.isFinite(Number(numberValue)))
+      .map(([key, numberValue]) => [key, Number(numberValue)]),
+  );
 }
 
 const holidays = {
@@ -262,6 +275,12 @@ const homeCalendarBtn = document.querySelector("#homeCalendarBtn");
 const homeVacationBtn = document.querySelector("#homeVacationBtn");
 const vacationEmployeeButtons = document.querySelector("#vacationEmployeeButtons");
 const vacationDetail = document.querySelector("#vacationDetail");
+const vacationHistoryDialog = document.querySelector("#vacationHistoryDialog");
+const vacationHistoryEyebrow = document.querySelector("#vacationHistoryEyebrow");
+const vacationHistoryTitle = document.querySelector("#vacationHistoryTitle");
+const vacationHistoryPeriod = document.querySelector("#vacationHistoryPeriod");
+const vacationHistoryBody = document.querySelector("#vacationHistoryBody");
+const closeVacationHistoryDialog = document.querySelector("#closeVacationHistoryDialog");
 const pullRefreshIndicator = document.querySelector("#pullRefreshIndicator");
 const employeeManageBtn = document.querySelector("#employeeManageBtn");
 const employeeManageDialog = document.querySelector("#employeeManageDialog");
@@ -1336,6 +1355,57 @@ function downloadAnnualRosterExcelFile() {
 
 window.__testBuildAnnualRosterExcel = buildAnnualRosterExcel;
 
+function sanitizeFileName(value) {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .replace(/\s+/g, "_")
+    .trim();
+}
+
+function downloadTableExcelFile(fileName, title, rows) {
+  const tableRows = rows
+    .map(
+      (row) => `
+        <tr>
+          ${row.map((cell) => `<td>${escapeExcelText(cell)}</td>`).join("")}
+        </tr>
+      `,
+    )
+    .join("");
+  const workbookHtml = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: Malgun Gothic, Arial, sans-serif; }
+      table { border-collapse: collapse; }
+      th, td { border: 1px solid #999; padding: 7px 10px; white-space: nowrap; text-align: center; }
+      th { background: #146c68; color: #fff; font-size: 16px; text-align: left; }
+      .header td { background: #e8f1ef; font-weight: 700; }
+      .section td { background: #f4f6f3; font-weight: 700; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <table>
+      <tr><th colspan="5">${escapeExcelText(title)}</th></tr>
+      ${tableRows}
+    </table>
+  </body>
+</html>`;
+  const blob = new Blob(["\ufeff", workbookHtml], {
+    type: "application/vnd.ms-excel;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `${sanitizeFileName(fileName)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function getEmployeeIdByName(name) {
   const normalizedName = String(name || "").trim();
   return employees.find((employee) => employee.name === normalizedName)?.id;
@@ -1747,9 +1817,76 @@ function saveEmployees() {
   saveRemoteDataInBackground("직원 정보는 이 기기에는 반영됐지만 서버 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.");
 }
 
-function getAnnualLeaveTotal(employee) {
-  const annualLeaveTotal = Number(employee?.annualLeaveTotal);
-  return Number.isFinite(annualLeaveTotal) ? annualLeaveTotal : defaultAnnualLeaveTotal;
+function getTodayDateKey() {
+  return toDateKey(new Date());
+}
+
+function getHireDate(employee) {
+  if (!employee?.hireDate || !/^\d{4}-\d{2}-\d{2}$/.test(employee.hireDate)) return null;
+  return fromDateKey(employee.hireDate);
+}
+
+function addMonthsClamped(date, amount) {
+  const next = new Date(date.getFullYear(), date.getMonth() + amount, 1);
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(date.getDate(), lastDay));
+  return next;
+}
+
+function addYearsClamped(date, amount) {
+  const next = new Date(date.getFullYear() + amount, date.getMonth(), 1);
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(date.getDate(), lastDay));
+  return next;
+}
+
+function countPassedMonthlyAnniversaries(hireDate, asOfDate) {
+  let count = 0;
+  for (let month = 1; month <= 11; month += 1) {
+    if (addMonthsClamped(hireDate, month) <= asOfDate) count += 1;
+  }
+  return count;
+}
+
+function countPassedAnnualAnniversaries(hireDate, asOfDate) {
+  let years = 0;
+  while (addYearsClamped(hireDate, years + 1) <= asOfDate) {
+    years += 1;
+  }
+  return years;
+}
+
+function getMonthlyLeaveTotal(employee, asOfDate = new Date()) {
+  const hireDate = getHireDate(employee);
+  if (!hireDate) return 0;
+  return countPassedMonthlyAnniversaries(hireDate, asOfDate);
+}
+
+function getAnnualLeaveAutoTotal(employee, asOfDate = new Date()) {
+  const hireDate = getHireDate(employee);
+  if (!hireDate) return 0;
+  const passedYears = countPassedAnnualAnniversaries(hireDate, asOfDate);
+  return passedYears * defaultAnnualLeaveTotal;
+}
+
+function getAnnualLeaveAdjustment(employee, seasonStartKey = "") {
+  const seasonAdjustment = Number(employee?.annualLeaveAdjustments?.[seasonStartKey]);
+  if (seasonStartKey && Number.isFinite(seasonAdjustment)) return seasonAdjustment;
+  const adjustment = Number(employee?.annualLeaveAdjustment);
+  return !seasonStartKey && Number.isFinite(adjustment) ? adjustment : 0;
+}
+
+function getAnnualLeaveTotal(employee, asOfDate = new Date()) {
+  const total = getAnnualLeaveAutoTotal(employee, asOfDate) + getAnnualLeaveAdjustment(employee);
+  return Math.max(total, 0);
+}
+
+function setAnnualLeaveAdjustment(employee, seasonStartKey, adjustment) {
+  if (!employee || !seasonStartKey) return;
+  employee.annualLeaveAdjustments = normalizeNumberMap({
+    ...(employee.annualLeaveAdjustments || {}),
+    [seasonStartKey]: Number.isFinite(Number(adjustment)) ? Number(adjustment) : 0,
+  });
 }
 
 function getEmployeeVacationEvents(employeeId, type) {
@@ -1799,17 +1936,17 @@ function saveVacationEvents(nextEvents) {
   saveRemoteDataInBackground("휴가 정보는 이 기기에는 반영됐지만 서버 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.");
 }
 
-function addVacationUse(employeeId, type, dateKey) {
-  if (!requireAdmin("휴가 저장은 관리자만 사용할 수 있습니다.")) return;
+function addVacationUse(employeeId, type, dateKey, options = {}) {
+  if (!requireAdmin("휴가 저장은 관리자만 사용할 수 있습니다.")) return false;
   if (!employeeId || !dateKey) {
     alert("직원과 날짜를 확인해주세요.");
-    return;
+    return false;
   }
 
   const isDuplicate = events.some((event) => event.employeeId === employeeId && event.type === type && event.date === dateKey);
   if (isDuplicate) {
     alert("이미 등록된 날짜입니다.");
-    return;
+    return false;
   }
 
   saveVacationEvents([
@@ -1819,9 +1956,16 @@ function addVacationUse(employeeId, type, dateKey) {
       employeeId,
       type,
       date: dateKey,
-      memo: type === "annual" ? "휴가 메뉴 연차 등록" : "휴가 메뉴 대체휴무 등록",
+      leaveSeasonStart: options.leaveSeasonStart || "",
+      memo:
+        type === "annual"
+          ? "휴가 메뉴 연차 등록"
+          : type === "monthly"
+            ? "휴가 메뉴 월차 등록"
+            : "휴가 메뉴 대체휴무 등록",
     },
   ]);
+  return true;
 }
 
 function removeVacationUse(eventId) {
@@ -1829,9 +1973,10 @@ function removeVacationUse(eventId) {
   saveVacationEvents(events.filter((event) => String(event.id) !== String(eventId)));
 }
 
-function getHolidayOptionsForSelect(employee) {
+function getHolidayOptionsForSelect(employee, year = "") {
   const earnedDates = new Set(getHolidayWorkDates(employee.id).map((workDate) => workDate.date));
   return Object.keys(holidays)
+    .filter((dateKey) => !year || dateKey.startsWith(String(year)))
     .sort()
     .map((dateKey) => ({
       date: dateKey,
@@ -1841,11 +1986,11 @@ function getHolidayOptionsForSelect(employee) {
 }
 
 function addSubstituteEarnedDate(employeeId, dateKey) {
-  if (!requireAdmin("대체휴무 발생 날짜 추가는 관리자만 사용할 수 있습니다.")) return;
+  if (!requireAdmin("대체휴무 발생 날짜 추가는 관리자만 사용할 수 있습니다.")) return false;
   const employee = getEmployee(employeeId);
   if (!employee || !dateKey) {
     alert("추가할 공휴일을 선택해주세요.");
-    return;
+    return false;
   }
 
   const autoEarnedDates = new Set(
@@ -1868,6 +2013,7 @@ function addSubstituteEarnedDate(employeeId, dateKey) {
   }
 
   saveEmployees();
+  return true;
 }
 
 function removeSubstituteEarnedDate(employeeId, dateKey) {
@@ -1993,6 +2139,454 @@ function renderSubstituteEarnedDateButtons(holidayWorks, substituteUsesByEarnedD
   `;
 }
 
+function isDateKeyInRange(dateKey, startKey, endKey) {
+  return Boolean(dateKey) && dateKey >= startKey && dateKey <= endKey;
+}
+
+function getSeasonLabel(startDate, endDate) {
+  return `[${String(startDate.getFullYear()).slice(-2)}-${String(endDate.getFullYear()).slice(-2)}]`;
+}
+
+function getAnnualAdjustmentSeasonIndex(employee, asOfDate) {
+  const hireDate = getHireDate(employee);
+  if (!hireDate) return -1;
+  const passedYears = countPassedAnnualAnniversaries(hireDate, asOfDate);
+  return Math.max(passedYears, 1);
+}
+
+function getLeaveSeasons(employee, asOfDate = new Date()) {
+  const hireDate = getHireDate(employee);
+  if (!hireDate) return [];
+
+  const annualUses = getEmployeeVacationEvents(employee.id, "annual");
+  const monthlyUses = getEmployeeVacationEvents(employee.id, "monthly");
+  const adjustmentSeasonIndex = getAnnualAdjustmentSeasonIndex(employee, asOfDate);
+  const maxSeasonIndex = Math.max(countPassedAnnualAnniversaries(hireDate, asOfDate), 1);
+
+  return Array.from({ length: maxSeasonIndex + 1 }, (_, seasonIndex) => {
+    const startDate = addYearsClamped(hireDate, seasonIndex);
+    const endDate = addYearsClamped(hireDate, seasonIndex + 1);
+    endDate.setDate(endDate.getDate() - 1);
+    const startKey = toDateKey(startDate);
+    const endKey = toDateKey(endDate);
+    const isSeasonEvent = (event) =>
+      event.leaveSeasonStart ? event.leaveSeasonStart === startKey : isDateKeyInRange(event.date, startKey, endKey);
+    const seasonAnnualUses = annualUses.filter(isSeasonEvent);
+    const seasonMonthlyUses = monthlyUses.filter(isSeasonEvent);
+    const monthLimitDate = asOfDate < endDate ? asOfDate : endDate;
+    const monthlyTotal = seasonIndex === 0 ? getMonthlyLeaveTotal(employee, monthLimitDate) : 0;
+    const hasStoredAdjustment = Object.prototype.hasOwnProperty.call(employee.annualLeaveAdjustments || {}, startKey);
+    const storedAdjustment = getAnnualLeaveAdjustment(employee, startKey);
+    const legacyAdjustment = seasonIndex === adjustmentSeasonIndex ? getAnnualLeaveAdjustment(employee) : 0;
+    const annualAdjustment = hasStoredAdjustment ? storedAdjustment : legacyAdjustment;
+    const annualTotal = seasonIndex >= 1 && startDate <= asOfDate ? Math.max(defaultAnnualLeaveTotal + annualAdjustment, 0) : 0;
+
+    return {
+      id: `leave-season-${seasonIndex}`,
+      seasonIndex,
+      label: getSeasonLabel(startDate, endDate),
+      startKey,
+      endKey,
+      monthlyTotal,
+      monthlyUses: seasonMonthlyUses,
+      monthlyRemaining: Math.max(monthlyTotal - seasonMonthlyUses.length, 0),
+      annualTotal,
+      annualAdjustment,
+      annualUses: seasonAnnualUses,
+      annualRemaining: Math.max(annualTotal - seasonAnnualUses.length, 0),
+    };
+  });
+}
+
+function getSubstituteYearSummaries(employee, asOfDate = new Date()) {
+  const employeeId = employee?.id;
+  if (!employeeId) return [];
+  const holidayWorks = getHolidayWorkDates(employeeId);
+  const usesByEarnedDate = getSubstituteUsesByEarnedDate(employeeId);
+  const hireDate = getHireDate(employee);
+  const startYear = hireDate ? hireDate.getFullYear() : asOfDate.getFullYear();
+  const endYear = Math.max(asOfDate.getFullYear(), ...holidayWorks.map((workDate) => Number(workDate.date.slice(0, 4))));
+  const years = [];
+  for (let year = startYear; year <= endYear; year += 1) {
+    years.push(String(year));
+  }
+
+  return years
+    .map((year) => {
+      const yearHolidayWorks = holidayWorks.filter((workDate) => workDate.date.startsWith(year));
+      const usedItems = yearHolidayWorks
+        .map((workDate) => ({
+          workDate,
+          usedEvent: usesByEarnedDate.get(workDate.date),
+        }))
+        .filter((item) => item.usedEvent);
+
+      return {
+        id: `substitute-year-${year}`,
+        year,
+        holidayWorks: yearHolidayWorks,
+        usesByEarnedDate,
+        usedCount: usedItems.length,
+        remaining: Math.max(yearHolidayWorks.length - usedItems.length, 0),
+      };
+    });
+}
+
+function renderLeaveSeasonCards(seasons) {
+  if (!seasons.length) {
+    return `<p class="vacation-empty">입사 날짜를 등록하면 시즌별 휴가가 표시됩니다.</p>`;
+  }
+
+  return `
+    <div class="vacation-summary-grid">
+      ${seasons
+        .map(
+          (season) => `
+            <button class="vacation-summary-card" type="button" data-vacation-season="${season.seasonIndex}">
+              <span>${season.label}</span>
+              <small>${season.startKey} ~ ${season.endKey}</small>
+              <div class="vacation-summary-lines">
+                ${
+                  season.seasonIndex === 0
+                    ? `<strong>월차 ${season.monthlyTotal} / 사용 ${season.monthlyUses.length} / 남음 ${season.monthlyRemaining}</strong>`
+                    : `<strong>연차 ${season.annualTotal} / 사용 ${season.annualUses.length} / 남음 ${season.annualRemaining}</strong>`
+                }
+              </div>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSubstituteYearCards(yearSummaries) {
+  if (!yearSummaries.length) {
+    return `<p class="vacation-empty">대체휴무 발생 내역이 없습니다.</p>`;
+  }
+
+  return `
+    <div class="vacation-summary-grid">
+      ${yearSummaries
+        .map(
+          (summary) => `
+            <button class="vacation-summary-card substitute-summary-card" type="button" data-substitute-year="${summary.year}">
+              <span>[${summary.year}]</span>
+              <small>${summary.year}년 공휴일 근무 기준</small>
+              <div class="vacation-summary-lines">
+                <strong>발생 ${summary.holidayWorks.length} / 사용 ${summary.usedCount} / 남음 ${summary.remaining}</strong>
+              </div>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function openVacationHistoryDialog({ eyebrow, title, period, bodyHtml }) {
+  if (!vacationHistoryDialog || !vacationHistoryBody) return;
+  vacationHistoryEyebrow.textContent = eyebrow;
+  vacationHistoryTitle.textContent = title;
+  vacationHistoryPeriod.textContent = period;
+  vacationHistoryBody.innerHTML = bodyHtml;
+
+  vacationHistoryBody.querySelectorAll("[data-remove-vacation]").forEach((button) => {
+    button.addEventListener("click", () => {
+      removeVacationUse(button.dataset.removeVacation);
+      vacationHistoryDialog.close();
+    });
+  });
+
+  vacationHistoryBody.querySelector("[data-save-season-adjustment]")?.addEventListener("click", (event) => {
+    if (!requireAdmin("연차 조정 저장은 관리자만 사용할 수 있습니다.")) return;
+    const button = event.currentTarget;
+    const employee = getEmployee(button.dataset.employeeId);
+    const input = vacationHistoryBody.querySelector(`[data-season-adjustment-input="${button.dataset.seasonStart}"]`);
+    if (!employee || !input) return;
+    setAnnualLeaveAdjustment(employee, button.dataset.seasonStart, Number(input.value));
+    saveEmployees();
+    vacationHistoryDialog.close();
+  });
+
+  vacationHistoryBody.querySelector("[data-add-season-vacation]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const input = vacationHistoryBody.querySelector(`[data-season-vacation-input="${button.dataset.leaveType}"]`);
+    if (!input?.value) {
+      alert("사용 날짜를 선택해주세요.");
+      return;
+    }
+    if (addVacationUse(button.dataset.employeeId, button.dataset.leaveType, input?.value, {
+      leaveSeasonStart: button.dataset.seasonStart,
+    })) {
+      vacationHistoryDialog.close();
+    }
+  });
+
+  vacationHistoryBody.querySelector("[data-add-substitute-earned]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const select = vacationHistoryBody.querySelector("[data-substitute-earned-select]");
+    if (!select?.value) {
+      alert("추가할 공휴일을 선택해주세요.");
+      return;
+    }
+    if (addSubstituteEarnedDate(button.dataset.employeeId, select?.value)) {
+      vacationHistoryDialog.close();
+    }
+  });
+
+  vacationHistoryBody.querySelector("[data-download-leave-season]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const employee = getEmployee(button.dataset.employeeId);
+    const season = getLeaveSeasons(employee).find((item) => item.startKey === button.dataset.seasonStart);
+    if (employee && season) downloadLeaveSeasonExcel(employee, season);
+  });
+
+  vacationHistoryBody.querySelector("[data-download-substitute-year]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const employee = getEmployee(button.dataset.employeeId);
+    const summary = getSubstituteYearSummaries(employee).find((item) => item.year === button.dataset.substituteYear);
+    if (employee && summary) downloadSubstituteYearExcel(employee, summary);
+  });
+
+  vacationHistoryBody.querySelectorAll("[data-remove-earned-date]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeSubstituteEarnedDate(selectedVacationEmployeeId, button.dataset.removeEarnedDate);
+      vacationHistoryDialog.close();
+    });
+  });
+
+  vacationHistoryBody.querySelectorAll(".substitute-earned-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!requireAdmin("대체휴무 사용 날짜 지정은 관리자만 사용할 수 있습니다.")) return;
+      const picker = vacationHistoryBody.querySelector(`.substitute-use-picker[data-earned-date="${button.dataset.earnedDate}"]`);
+      if (!picker) return;
+      if (typeof picker.showPicker === "function") {
+        picker.showPicker();
+      } else {
+        picker.focus();
+        picker.click();
+      }
+    });
+  });
+
+  vacationHistoryBody.querySelectorAll(".substitute-use-picker").forEach((input) => {
+    input.addEventListener("change", () => {
+      saveSubstituteUse(selectedVacationEmployeeId, input.dataset.earnedDate, input.value);
+      vacationHistoryDialog.close();
+    });
+  });
+
+  if (typeof vacationHistoryDialog.showModal === "function") {
+    vacationHistoryDialog.showModal();
+  } else {
+    vacationHistoryDialog.setAttribute("open", "");
+  }
+}
+
+function downloadLeaveSeasonExcel(employee, season) {
+  const isMonthlySeason = season.seasonIndex === 0;
+  const leaveName = isMonthlySeason ? "월차" : "연차";
+  const summaryRows = isMonthlySeason
+    ? [
+        ["구분", "발생", "사용", "남음", "기간"],
+        ["월차", season.monthlyTotal, season.monthlyUses.length, season.monthlyRemaining, `${season.startKey} ~ ${season.endKey}`],
+      ]
+    : [
+        ["구분", "기본", "조정", "총개수", "기간"],
+        ["연차", defaultAnnualLeaveTotal, season.annualAdjustment, season.annualTotal, `${season.startKey} ~ ${season.endKey}`],
+        ["구분", "총개수", "사용", "남음", ""],
+        ["연차", season.annualTotal, season.annualUses.length, season.annualRemaining, ""],
+      ];
+  const useRows = (isMonthlySeason ? season.monthlyUses : season.annualUses).map((event, index) => [
+    index + 1,
+    event.date,
+    event.memo || "",
+    event.leaveSeasonStart ? `${season.label} 차감` : "날짜 기준 자동 분류",
+    "",
+  ]);
+  const rows = [
+    ["직원", employee.name, "휴가", leaveName, ""],
+    ["시즌", season.label, "기간", `${season.startKey} ~ ${season.endKey}`, ""],
+    ["", "", "", "", ""],
+    ...summaryRows,
+    ["", "", "", "", ""],
+    ["사용 날짜", "", "", "", ""],
+    ["순번", "사용일", "메모", "차감 기준", ""],
+    ...(useRows.length ? useRows : [["", "등록된 날짜가 없습니다.", "", "", ""]]),
+  ];
+
+  downloadTableExcelFile(`${employee.name}_${season.label.replace(/[\[\]]/g, "")}_${leaveName}`, `${employee.name} ${season.label} ${leaveName}`, rows);
+}
+
+function downloadSubstituteYearExcel(employee, summary) {
+  const rows = [
+    ["직원", employee.name, "휴가", "대체휴무", ""],
+    ["연도", summary.year, "기준", "공휴일 근무 발생일", ""],
+    ["", "", "", "", ""],
+    ["구분", "발생", "사용", "남음", ""],
+    ["대체휴무", summary.holidayWorks.length, summary.usedCount, summary.remaining, ""],
+    ["", "", "", "", ""],
+    ["발생 날짜", "", "", "", ""],
+    ["순번", "발생일", "공휴일", "사용일", "상태"],
+    ...summary.holidayWorks.map((workDate, index) => {
+      const usedEvent = summary.usesByEarnedDate.get(workDate.date);
+      return [
+        index + 1,
+        workDate.date,
+        workDate.holidayName,
+        usedEvent?.date || "",
+        usedEvent ? "사용" : "미사용",
+      ];
+    }),
+  ];
+
+  if (!summary.holidayWorks.length) {
+    rows.push(["", "등록된 발생일이 없습니다.", "", "", ""]);
+  }
+
+  downloadTableExcelFile(`${employee.name}_${summary.year}_대체휴무`, `${employee.name} ${summary.year} 대체휴무`, rows);
+}
+
+function openLeaveSeasonHistory(employee, season) {
+  const isMonthlySeason = season.seasonIndex === 0;
+  const adminTools = isAdmin
+    ? isMonthlySeason
+      ? `
+        <div class="vacation-admin-tools compact admin-only">
+          <label>
+            월차 사용 날짜
+            <span>
+              <input data-season-vacation-input="monthly" type="date" />
+              <button class="primary-button" type="button" data-add-season-vacation data-employee-id="${employee.id}" data-leave-type="monthly" data-season-start="${season.startKey}">추가</button>
+            </span>
+          </label>
+          <label>
+            내보내기
+            <span>
+              <button class="secondary-button" type="button" data-download-leave-season data-employee-id="${employee.id}" data-season-start="${season.startKey}">엑셀 다운로드</button>
+            </span>
+          </label>
+        </div>
+      `
+      : `
+        <div class="vacation-admin-tools compact admin-only">
+          <label>
+            연차 조정
+            <span>
+              <input data-season-adjustment-input="${season.startKey}" type="number" step="0.5" value="${season.annualAdjustment}" />
+              <button class="secondary-button" type="button" data-save-season-adjustment data-employee-id="${employee.id}" data-season-start="${season.startKey}">저장</button>
+            </span>
+          </label>
+          <label>
+            연차 사용 날짜
+            <span>
+              <input data-season-vacation-input="annual" type="date" />
+              <button class="primary-button" type="button" data-add-season-vacation data-employee-id="${employee.id}" data-leave-type="annual" data-season-start="${season.startKey}">추가</button>
+            </span>
+          </label>
+          <label>
+            내보내기
+            <span>
+              <button class="secondary-button" type="button" data-download-leave-season data-employee-id="${employee.id}" data-season-start="${season.startKey}">엑셀 다운로드</button>
+            </span>
+          </label>
+        </div>
+      `
+    : "";
+  const statHtml = isMonthlySeason
+    ? `
+      <div class="vacation-stat"><span>월차 발생</span><strong>${season.monthlyTotal}</strong></div>
+      <div class="vacation-stat"><span>월차 사용</span><strong>${season.monthlyUses.length}</strong></div>
+      <div class="vacation-stat"><span>월차 남음</span><strong>${season.monthlyRemaining}</strong></div>
+    `
+    : `
+      <div class="vacation-stat"><span>연차 기본</span><strong>${defaultAnnualLeaveTotal}</strong></div>
+      <div class="vacation-stat"><span>연차 조정</span><strong>${season.annualAdjustment > 0 ? "+" : ""}${season.annualAdjustment}</strong></div>
+      <div class="vacation-stat"><span>연차 총개수</span><strong>${season.annualTotal}</strong></div>
+      <div class="vacation-stat"><span>연차 사용</span><strong>${season.annualUses.length}</strong></div>
+      <div class="vacation-stat"><span>연차 남음</span><strong>${season.annualRemaining}</strong></div>
+    `;
+  const listHtml = isMonthlySeason
+    ? `
+      <section class="vacation-section">
+        <h4>월차 사용 날짜</h4>
+        ${renderVacationDateList(season.monthlyUses, { removable: true })}
+      </section>
+    `
+    : `
+      <section class="vacation-section">
+        <h4>연차 사용 날짜</h4>
+        ${renderVacationDateList(season.annualUses, { removable: true })}
+      </section>
+    `;
+
+  openVacationHistoryDialog({
+    eyebrow: `${employee.name} 휴가 시즌`,
+    title: `${season.label} ${isMonthlySeason ? "월차" : "연차"}`,
+    period: `${season.startKey} ~ ${season.endKey}`,
+    bodyHtml: `
+      <div class="vacation-popup-stats">
+        ${statHtml}
+      </div>
+      ${adminTools}
+      ${listHtml}
+    `,
+  });
+}
+
+function openSubstituteYearHistory(employee, summary) {
+  const holidayOptions = getHolidayOptionsForSelect(employee, summary.year);
+  const adminTools = isAdmin
+    ? `
+      <div class="vacation-admin-tools compact admin-only">
+        <label>
+          대체휴무 발생 공휴일
+          <span>
+            <select data-substitute-earned-select>
+              <option value="">공휴일 선택</option>
+              ${holidayOptions
+                .map(
+                  (holidayOption) =>
+                    `<option value="${holidayOption.date}">${holidayOption.date} · ${escapeExcelText(holidayOption.name)}${
+                      holidayOption.isAdded ? " · 추가됨" : ""
+                    }</option>`,
+                )
+                .join("")}
+            </select>
+            <button class="primary-button" type="button" data-add-substitute-earned data-employee-id="${employee.id}">발생일 추가</button>
+          </span>
+        </label>
+        <label>
+          내보내기
+          <span>
+            <button class="secondary-button" type="button" data-download-substitute-year data-employee-id="${employee.id}" data-substitute-year="${summary.year}">엑셀 다운로드</button>
+          </span>
+        </label>
+      </div>
+    `
+    : "";
+
+  openVacationHistoryDialog({
+    eyebrow: `${employee.name} 대체휴무`,
+    title: `[${summary.year}] 대체휴무`,
+    period: `${summary.year}년 공휴일 근무 기준`,
+    bodyHtml: `
+      <div class="vacation-popup-stats">
+        <div class="vacation-stat"><span>대체휴무 발생</span><strong>${summary.holidayWorks.length}</strong></div>
+        <div class="vacation-stat"><span>대체휴무 사용</span><strong>${summary.usedCount}</strong></div>
+        <div class="vacation-stat"><span>대체휴무 남음</span><strong>${summary.remaining}</strong></div>
+      </div>
+      ${adminTools}
+      <section class="vacation-section">
+        <h4>대체휴무 발생 날짜</h4>
+        ${renderSubstituteEarnedDateButtons(summary.holidayWorks, summary.usesByEarnedDate)}
+      </section>
+    `,
+  });
+}
+
 function renderVacationPage() {
   if (!vacationEmployeeButtons || !vacationDetail) return;
 
@@ -2031,16 +2625,9 @@ function renderVacationPage() {
     return;
   }
 
-  const annualUses = getEmployeeVacationEvents(selectedEmployee.id, "annual");
-  const holidayWorks = getHolidayWorkDates(selectedEmployee.id);
-  const holidayOptions = getHolidayOptionsForSelect(selectedEmployee);
-  const substituteUsesByEarnedDate = getSubstituteUsesByEarnedDate(selectedEmployee.id);
-  const substituteUseCount = Array.from(substituteUsesByEarnedDate.keys()).filter((earnedDate) =>
-    holidayWorks.some((workDate) => workDate.date === earnedDate),
-  ).length;
-  const annualTotal = getAnnualLeaveTotal(selectedEmployee);
-  const annualRemaining = Math.max(annualTotal - annualUses.length, 0);
-  const substituteRemaining = Math.max(holidayWorks.length - substituteUseCount, 0);
+  const today = fromDateKey(getTodayDateKey());
+  const leaveSeasons = getLeaveSeasons(selectedEmployee, today);
+  const substituteYearSummaries = getSubstituteYearSummaries(selectedEmployee, today);
 
   vacationDetail.innerHTML = `
     <div class="vacation-detail-header">
@@ -2051,103 +2638,28 @@ function renderVacationPage() {
       </div>
     </div>
 
-    <div class="vacation-stats">
-      <div class="vacation-stat"><span>연차 총개수</span><strong>${annualTotal}</strong></div>
-      <div class="vacation-stat"><span>연차 사용</span><strong>${annualUses.length}</strong></div>
-      <div class="vacation-stat"><span>연차 남음</span><strong>${annualRemaining}</strong></div>
-      <div class="vacation-stat"><span>대체휴무 발생</span><strong>${holidayWorks.length}</strong></div>
-      <div class="vacation-stat"><span>대체휴무 사용</span><strong>${substituteUseCount}</strong></div>
-      <div class="vacation-stat"><span>대체휴무 남음</span><strong>${substituteRemaining}</strong></div>
-    </div>
-
-    <div class="vacation-admin-tools admin-only">
-      <label>
-        연차 총개수
-        <span>
-          <input id="annualLeaveTotalInput" type="number" min="0" step="0.5" value="${annualTotal}" />
-          <button id="saveAnnualLeaveTotal" class="secondary-button" type="button">저장</button>
-        </span>
-      </label>
-      <label>
-        연차 사용 날짜
-        <span>
-          <input id="annualUseDateInput" type="date" />
-          <button id="addAnnualUse" class="primary-button" type="button">추가</button>
-        </span>
-      </label>
-      <label>
-        대체휴무 발생 공휴일
-        <span>
-          <select id="substituteEarnedHolidayInput">
-            <option value="">공휴일 선택</option>
-            ${holidayOptions
-              .map(
-                (holidayOption) =>
-                  `<option value="${holidayOption.date}">${holidayOption.date} · ${escapeExcelText(holidayOption.name)}${
-                    holidayOption.isAdded ? " · 추가됨" : ""
-                  }</option>`,
-              )
-              .join("")}
-          </select>
-          <button id="addSubstituteEarnedDate" class="primary-button" type="button">발생일 추가</button>
-        </span>
-      </label>
-    </div>
-
     <section class="vacation-section">
-      <h4>연차 사용된 날짜</h4>
-      ${renderVacationDateList(annualUses, { removable: true })}
+      <h4>월차 · 연차 시즌</h4>
+      ${renderLeaveSeasonCards(leaveSeasons)}
     </section>
 
     <section class="vacation-section">
-      <h4>대체휴무 발생 날짜</h4>
-      ${renderSubstituteEarnedDateButtons(holidayWorks, substituteUsesByEarnedDate)}
+      <h4>대체휴무</h4>
+      ${renderSubstituteYearCards(substituteYearSummaries)}
     </section>
   `;
 
-  vacationDetail.querySelector("#saveAnnualLeaveTotal")?.addEventListener("click", () => {
-    if (!requireAdmin("연차 총개수 저장은 관리자만 사용할 수 있습니다.")) return;
-    const nextTotal = Number(vacationDetail.querySelector("#annualLeaveTotalInput")?.value);
-    selectedEmployee.annualLeaveTotal = Number.isFinite(nextTotal) ? nextTotal : defaultAnnualLeaveTotal;
-    saveEmployees();
-  });
-
-  vacationDetail.querySelector("#addAnnualUse")?.addEventListener("click", () => {
-    addVacationUse(selectedEmployee.id, "annual", vacationDetail.querySelector("#annualUseDateInput")?.value);
-  });
-
-  vacationDetail.querySelector("#addSubstituteEarnedDate")?.addEventListener("click", () => {
-    addSubstituteEarnedDate(selectedEmployee.id, vacationDetail.querySelector("#substituteEarnedHolidayInput")?.value);
-  });
-
-  vacationDetail.querySelectorAll("[data-remove-vacation]").forEach((button) => {
-    button.addEventListener("click", () => removeVacationUse(button.dataset.removeVacation));
-  });
-
-  vacationDetail.querySelectorAll("[data-remove-earned-date]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      removeSubstituteEarnedDate(selectedEmployee.id, button.dataset.removeEarnedDate);
-    });
-  });
-
-  vacationDetail.querySelectorAll(".substitute-earned-button").forEach((button) => {
+  vacationDetail.querySelectorAll("[data-vacation-season]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (!requireAdmin("대체휴무 사용 날짜 지정은 관리자만 사용할 수 있습니다.")) return;
-      const picker = vacationDetail.querySelector(`.substitute-use-picker[data-earned-date="${button.dataset.earnedDate}"]`);
-      if (!picker) return;
-      if (typeof picker.showPicker === "function") {
-        picker.showPicker();
-      } else {
-        picker.focus();
-        picker.click();
-      }
+      const season = leaveSeasons.find((item) => String(item.seasonIndex) === String(button.dataset.vacationSeason));
+      if (season) openLeaveSeasonHistory(selectedEmployee, season);
     });
   });
 
-  vacationDetail.querySelectorAll(".substitute-use-picker").forEach((input) => {
-    input.addEventListener("change", () => {
-      saveSubstituteUse(selectedEmployee.id, input.dataset.earnedDate, input.value);
+  vacationDetail.querySelectorAll("[data-substitute-year]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const summary = substituteYearSummaries.find((item) => String(item.year) === String(button.dataset.substituteYear));
+      if (summary) openSubstituteYearHistory(selectedEmployee, summary);
     });
   });
 }
@@ -2243,6 +2755,8 @@ function addEmployee() {
       exitDate: "",
       order: employees.length,
       annualLeaveTotal: defaultAnnualLeaveTotal,
+      annualLeaveAdjustment: 0,
+      annualLeaveAdjustments: {},
     },
   ];
   newEmployeeName.value = "";
@@ -2768,6 +3282,14 @@ closeDailyPlanDialog.addEventListener("click", () => {
     dailyPlanDialog.close();
   } else {
     dailyPlanDialog.removeAttribute("open");
+  }
+});
+
+closeVacationHistoryDialog.addEventListener("click", () => {
+  if (vacationHistoryDialog.open) {
+    vacationHistoryDialog.close();
+  } else {
+    vacationHistoryDialog.removeAttribute("open");
   }
 });
 
