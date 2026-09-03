@@ -1332,20 +1332,22 @@ button {
 }
 
 .substitute-earned-list {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 8px;
 }
 
 .substitute-earned-item {
   position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
 }
 
 .substitute-earned-button {
   display: grid;
+  width: 100%;
   min-height: 46px;
   padding: 7px 11px;
   border: 1px solid #d8e2df;
@@ -1394,13 +1396,33 @@ button {
 }
 
 .substitute-use-picker {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--text);
+  font: inherit;
+}
+
+.substitute-use-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #d8e2df;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.substitute-use-controls[hidden] {
+  display: none;
+}
+
+.substitute-use-save {
+  min-height: 38px;
 }
 
 .vacation-empty {

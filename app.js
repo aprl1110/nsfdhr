@@ -2154,8 +2154,11 @@ function renderSubstituteEarnedDateButtons(holidayWorks, substituteUsesByEarnedD
           const usedClass = usedEvent ? " used" : "";
           const buttonLabel = `${workDate.date} · ${workDate.holidayName}`;
           const usedText = usedEvent ? `<small>사용 ${escapeExcelText(usedEvent.date)}</small>` : "<small>미사용</small>";
-          const dateInput = isAdmin
-            ? `<input class="substitute-use-picker admin-only" type="date" value="${usedEvent?.date || ""}" data-earned-date="${workDate.date}" aria-label="${workDate.date} 대체휴무 사용 날짜" />`
+          const useControls = isAdmin
+            ? `<span class="substitute-use-controls admin-only" hidden data-substitute-use-controls="${workDate.date}">
+                <input class="substitute-use-picker" type="date" value="${usedEvent?.date || ""}" data-earned-date="${workDate.date}" aria-label="${workDate.date} 대체휴무 사용 날짜" />
+                <button class="secondary-button substitute-use-save" type="button" data-save-substitute-use="${workDate.date}">저장</button>
+              </span>`
             : "";
 
           return `
@@ -2169,7 +2172,7 @@ function renderSubstituteEarnedDateButtons(holidayWorks, substituteUsesByEarnedD
                   ? `<button class="substitute-earned-remove admin-only" type="button" data-remove-earned-date="${workDate.date}" aria-label="${workDate.date} 대체휴무 발생 삭제">삭제</button>`
                   : ""
               }
-              ${dateInput}
+              ${useControls}
             </span>
           `;
         })
@@ -2399,20 +2402,32 @@ function openVacationHistoryDialog({ eyebrow, title, period, bodyHtml }) {
   vacationHistoryBody.querySelectorAll(".substitute-earned-button").forEach((button) => {
     button.addEventListener("click", () => {
       if (!requireAdmin("대체휴무 사용 날짜 지정은 관리자만 사용할 수 있습니다.")) return;
+      const controls = vacationHistoryBody.querySelector(
+        `[data-substitute-use-controls="${button.dataset.earnedDate}"]`,
+      );
       const picker = vacationHistoryBody.querySelector(`.substitute-use-picker[data-earned-date="${button.dataset.earnedDate}"]`);
+      if (controls) {
+        controls.hidden = !controls.hidden;
+      }
       if (!picker) return;
-      if (typeof picker.showPicker === "function") {
+      if (!controls?.hidden && typeof picker.showPicker === "function") {
         picker.showPicker();
-      } else {
+      } else if (!controls?.hidden) {
         picker.focus();
-        picker.click();
       }
     });
   });
 
-  vacationHistoryBody.querySelectorAll(".substitute-use-picker").forEach((input) => {
-    input.addEventListener("change", () => {
-      saveSubstituteUse(selectedVacationEmployeeId, input.dataset.earnedDate, input.value);
+  vacationHistoryBody.querySelectorAll("[data-save-substitute-use]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const picker = vacationHistoryBody.querySelector(
+        `.substitute-use-picker[data-earned-date="${button.dataset.saveSubstituteUse}"]`,
+      );
+      if (!picker?.value) {
+        alert("대체휴무 사용 날짜를 선택해주세요.");
+        return;
+      }
+      saveSubstituteUse(selectedVacationEmployeeId, button.dataset.saveSubstituteUse, picker.value);
       vacationHistoryDialog.close();
     });
   });
