@@ -125,6 +125,7 @@ function normalizeEmployees(employeeList = []) {
       annualLeaveAdjustments: normalizeNumberMap(employee.annualLeaveAdjustments),
       substituteEarnedDates: normalizeDateList(employee.substituteEarnedDates),
       substituteEarnedRemovedDates: normalizeDateList(employee.substituteEarnedRemovedDates),
+      hiddenVacationItems: normalizeStringList(employee.hiddenVacationItems),
     }))
     .filter((employee) => {
       if (seen.has(employee.id)) return false;
@@ -150,6 +151,17 @@ function normalizeDateList(value) {
       dateValues
         .map((item) => (typeof item === "string" ? item : item?.date))
         .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey || "")),
+    ),
+  ).sort();
+}
+
+function normalizeStringList(value) {
+  const items = Array.isArray(value) ? value : [];
+  return Array.from(
+    new Set(
+      items
+        .map((item) => String(item || "").trim())
+        .filter(Boolean),
     ),
   ).sort();
 }
@@ -1928,6 +1940,36 @@ function setAnnualLeaveAdjustment(employee, seasonStartKey, adjustment) {
   });
 }
 
+function getLeaveSeasonHideKey(season) {
+  if (!season?.startKey) return "";
+  return `${season.seasonIndex === 0 ? "monthly" : "annual"}:${season.startKey}`;
+}
+
+function getSubstituteYearHideKey(summary) {
+  if (!summary?.year) return "";
+  return `substitute:${summary.year}`;
+}
+
+function isVacationItemHidden(employee, hideKey) {
+  return Boolean(hideKey && employee?.hiddenVacationItems?.includes(hideKey));
+}
+
+function setVacationItemHidden(employeeId, hideKey, shouldHide) {
+  if (!requireAdmin("휴가 숨김 설정은 관리자만 사용할 수 있습니다.")) return false;
+  const employee = getEmployee(employeeId);
+  if (!employee || !hideKey) return false;
+
+  const hiddenItems = new Set(normalizeStringList(employee.hiddenVacationItems));
+  if (shouldHide) {
+    hiddenItems.add(hideKey);
+  } else {
+    hiddenItems.delete(hideKey);
+  }
+  employee.hiddenVacationItems = Array.from(hiddenItems).sort();
+  saveEmployees();
+  return true;
+}
+
 function getEmployeeVacationEvents(employeeId, type) {
   return events
     .filter((event) => event.employeeId === employeeId && event.type === type && event.date)
@@ -2236,6 +2278,8 @@ function getLeaveSeasons(employee, asOfDate = new Date()) {
       annualAdjustment,
       annualUses: seasonAnnualUses,
       annualRemaining: Math.max(annualTotal - seasonAnnualUses.length, 0),
+      hideKey: `${seasonIndex === 0 ? "monthly" : "annual"}:${startKey}`,
+      isHidden: isVacationItemHidden(employee, `${seasonIndex === 0 ? "monthly" : "annual"}:${startKey}`),
     };
   });
 }
@@ -2270,23 +2314,27 @@ function getSubstituteYearSummaries(employee, asOfDate = new Date()) {
         usesByEarnedDate,
         usedCount: usedItems.length,
         remaining: Math.max(yearHolidayWorks.length - usedItems.length, 0),
+        hideKey: `substitute:${year}`,
+        isHidden: isVacationItemHidden(employee, `substitute:${year}`),
       };
     });
 }
 
 function renderLeaveSeasonCards(seasons) {
-  if (!seasons.length) {
+  const visibleSeasons = isAdmin ? seasons : seasons.filter((season) => !season.isHidden);
+  if (!visibleSeasons.length) {
     return `<p class="vacation-empty">입사 날짜를 등록하면 시즌별 휴가가 표시됩니다.</p>`;
   }
 
   return `
     <div class="vacation-summary-grid">
-      ${seasons
+      ${visibleSeasons
         .map(
           (season) => `
-            <button class="vacation-summary-card" type="button" data-vacation-season="${season.seasonIndex}">
+            <button class="vacation-summary-card${season.isHidden ? " hidden-vacation-card" : ""}" type="button" data-vacation-season="${season.seasonIndex}">
               <span>${season.label}</span>
               <small>${season.startKey} ~ ${season.endKey}</small>
+              ${season.isHidden ? `<small class="hidden-vacation-badge">숨김</small>` : ""}
               <div class="vacation-summary-lines">
                 ${
                   season.seasonIndex === 0
@@ -2303,18 +2351,20 @@ function renderLeaveSeasonCards(seasons) {
 }
 
 function renderSubstituteYearCards(yearSummaries) {
-  if (!yearSummaries.length) {
+  const visibleSummaries = isAdmin ? yearSummaries : yearSummaries.filter((summary) => !summary.isHidden);
+  if (!visibleSummaries.length) {
     return `<p class="vacation-empty">대체휴무 발생 내역이 없습니다.</p>`;
   }
 
   return `
     <div class="vacation-summary-grid">
-      ${yearSummaries
+      ${visibleSummaries
         .map(
           (summary) => `
-            <button class="vacation-summary-card substitute-summary-card" type="button" data-substitute-year="${summary.year}">
+            <button class="vacation-summary-card substitute-summary-card${summary.isHidden ? " hidden-vacation-card" : ""}" type="button" data-substitute-year="${summary.year}">
               <span>[${summary.year}]</span>
               <small>${summary.year}년 공휴일 근무 기준</small>
+              ${summary.isHidden ? `<small class="hidden-vacation-badge">숨김</small>` : ""}
               <div class="vacation-summary-lines">
                 <strong>발생 ${summary.holidayWorks.length} / 사용 ${summary.usedCount} / 남음 ${summary.remaining}</strong>
               </div>
@@ -2349,6 +2399,13 @@ function openVacationHistoryDialog({ eyebrow, title, period, bodyHtml }) {
     setAnnualLeaveAdjustment(employee, button.dataset.seasonStart, Number(input.value));
     saveEmployees();
     vacationHistoryDialog.close();
+  });
+
+  vacationHistoryBody.querySelector("[data-toggle-vacation-hidden]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    if (setVacationItemHidden(button.dataset.employeeId, button.dataset.vacationHideKey, button.dataset.hiddenAction === "hide")) {
+      vacationHistoryDialog.close();
+    }
   });
 
   vacationHistoryBody.querySelector("[data-add-season-vacation]")?.addEventListener("click", (event) => {
@@ -2505,6 +2562,24 @@ function downloadSubstituteYearExcel(employee, summary) {
 
 function openLeaveSeasonHistory(employee, season) {
   const isMonthlySeason = season.seasonIndex === 0;
+  const hideKey = getLeaveSeasonHideKey(season);
+  const hideButton = isAdmin
+    ? `
+      <label>
+        표시 설정
+        <span>
+          <button
+            class="${season.isHidden ? "secondary-button" : "danger-button"}"
+            type="button"
+            data-toggle-vacation-hidden
+            data-employee-id="${employee.id}"
+            data-vacation-hide-key="${hideKey}"
+            data-hidden-action="${season.isHidden ? "show" : "hide"}"
+          >${season.isHidden ? "숨김해제" : "숨김"}</button>
+        </span>
+      </label>
+    `
+    : "";
   const adminTools = isAdmin
     ? isMonthlySeason
       ? `
@@ -2522,6 +2597,7 @@ function openLeaveSeasonHistory(employee, season) {
               <button class="secondary-button" type="button" data-download-leave-season data-employee-id="${employee.id}" data-season-start="${season.startKey}">엑셀 다운로드</button>
             </span>
           </label>
+          ${hideButton}
         </div>
       `
       : `
@@ -2546,6 +2622,7 @@ function openLeaveSeasonHistory(employee, season) {
               <button class="secondary-button" type="button" data-download-leave-season data-employee-id="${employee.id}" data-season-start="${season.startKey}">엑셀 다운로드</button>
             </span>
           </label>
+          ${hideButton}
         </div>
       `
     : "";
@@ -2592,6 +2669,24 @@ function openLeaveSeasonHistory(employee, season) {
 
 function openSubstituteYearHistory(employee, summary) {
   const holidayOptions = getHolidayOptionsForSelect(employee, summary.year);
+  const hideKey = getSubstituteYearHideKey(summary);
+  const hideButton = isAdmin
+    ? `
+      <label>
+        표시 설정
+        <span>
+          <button
+            class="${summary.isHidden ? "secondary-button" : "danger-button"}"
+            type="button"
+            data-toggle-vacation-hidden
+            data-employee-id="${employee.id}"
+            data-vacation-hide-key="${hideKey}"
+            data-hidden-action="${summary.isHidden ? "show" : "hide"}"
+          >${summary.isHidden ? "숨김해제" : "숨김"}</button>
+        </span>
+      </label>
+    `
+    : "";
   const adminTools = isAdmin
     ? `
       <div class="vacation-admin-tools compact admin-only">
@@ -2618,6 +2713,7 @@ function openSubstituteYearHistory(employee, summary) {
             <button class="secondary-button" type="button" data-download-substitute-year data-employee-id="${employee.id}" data-substitute-year="${summary.year}">엑셀 다운로드</button>
           </span>
         </label>
+        ${hideButton}
       </div>
     `
     : "";
@@ -2811,6 +2907,7 @@ function addEmployee() {
       annualLeaveTotal: defaultAnnualLeaveTotal,
       annualLeaveAdjustment: 0,
       annualLeaveAdjustments: {},
+      hiddenVacationItems: [],
     },
   ];
   newEmployeeName.value = "";

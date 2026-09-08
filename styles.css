@@ -612,7 +612,7 @@ button {
   padding: 10px;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: white;
+  background: #ffffff;
 }
 
 .calendar-day:nth-child(7n) {
@@ -982,7 +982,7 @@ button {
   padding: 6px;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: white;
+  background: #ffffff;
   vertical-align: middle;
 }
 
@@ -1220,6 +1220,26 @@ button {
 .vacation-summary-card:hover {
   border-color: #b7cfcb;
   background: var(--accent-soft);
+}
+
+.vacation-summary-card.hidden-vacation-card {
+  border-style: dashed;
+  background: #f0f2f1;
+  color: #78837e;
+}
+
+.vacation-summary-card.hidden-vacation-card:hover {
+  background: #e8eeec;
+}
+
+.hidden-vacation-badge {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #d8dedb;
+  color: #5f6b66;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .vacation-summary-card span {
