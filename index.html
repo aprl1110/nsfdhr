@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HR Calendar</title>
-    <link rel="stylesheet" href="styles.css?v=vacation-hide-1" />
+    <link rel="stylesheet" href="styles.css?v=holiday-check-save-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -18,6 +18,7 @@
           </label>
           <button id="dailyPlanListBtn" class="text-button admin-only" type="button">계획서 목록</button>
           <button id="employeeManageBtn" class="text-button admin-only" type="button">직원관리</button>
+          <button id="holidayManageBtn" class="text-button admin-only" type="button">공휴일관리</button>
           <button id="adminLogoutBtn" class="text-button" type="button" hidden>로그아웃</button>
           <div id="dailyPlanUploadProgress" class="upload-progress admin-only" hidden>
             <div class="upload-progress-row">
@@ -30,7 +31,7 @@
           </div>
         </div>
         <section class="home-hero">
-          <img class="home-title-image" src="ns-fd-logo-clean.png?v=vacation-hide-1" alt="NS홈쇼핑 FD" />
+          <img class="home-title-image" src="ns-fd-logo-clean.png?v=holiday-check-save-1" alt="NS홈쇼핑 FD" />
           <div class="home-actions">
             <button id="homeRosterBtn" class="home-action-button" type="button">근무표</button>
             <button id="homeCalendarBtn" class="home-action-button primary" type="button">캘린더</button>
@@ -41,7 +42,7 @@
 
       <aside class="sidebar page-panel" data-page-panel="calendar roster vacation" aria-label="직원 목록" hidden>
         <button id="homeLogoBtn" class="brand home-logo-button" type="button" aria-label="홈으로 이동">
-          <img class="sidebar-logo-image" src="ns-fd-logo-clean.png?v=vacation-hide-1" alt="NS홈쇼핑 FD" />
+          <img class="sidebar-logo-image" src="ns-fd-logo-clean.png?v=holiday-check-save-1" alt="NS홈쇼핑 FD" />
         </button>
 
         <nav class="side-nav" aria-label="페이지">
@@ -317,6 +318,48 @@
       </form>
     </dialog>
 
+    <dialog id="holidayManageDialog" class="employee-manage-dialog">
+      <form id="holidayManageForm" class="employee-manage-card holiday-manage-card" method="dialog">
+        <div class="dialog-header">
+          <div>
+            <p>관리자</p>
+            <h2>공휴일 관리</h2>
+          </div>
+          <button id="closeHolidayManageDialog" class="icon-button" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="holiday-manage-toolbar">
+          <label>
+            연도
+            <input id="holidayManageYear" type="number" min="2024" max="2099" step="1" />
+          </label>
+          <button id="loadHolidayYearBtn" class="secondary-button" type="button">보기</button>
+          <button id="autoLoadHolidayBtn" class="primary-button" type="button">자동 불러오기</button>
+          <button id="saveCheckedHolidaysBtn" class="primary-button" type="button">체크된 공휴일 저장</button>
+          <span id="holidayManageStatus" class="holiday-manage-status"></span>
+        </div>
+
+        <div id="holidayManageList" class="holiday-manage-list"></div>
+
+        <div class="employee-hire-box">
+          <h3>직접 추가</h3>
+          <div class="employee-hire-fields">
+            <label>
+              날짜
+              <input id="newHolidayDate" type="date" />
+            </label>
+            <label>
+              공휴일명
+              <input id="newHolidayName" type="text" placeholder="예: 신정" />
+            </label>
+            <button id="addHolidayBtn" class="primary-button" type="button">추가</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="vacationHistoryDialog" class="vacation-history-dialog">
       <div class="vacation-history-card">
         <div class="dialog-header">
@@ -334,6 +377,6 @@
     </dialog>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="app.js?v=vacation-hide-1"></script>
+    <script src="app.js?v=holiday-check-save-1"></script>
   </body>
 </html>

@@ -53,6 +53,7 @@ let importedRosterOnly = false;
 let importedRosterYear = null;
 let dailyPlan = null;
 let dailyPlans = [];
+let holidayDrafts = {};
 events = loadStoredData("hrEvents", events);
 shiftOverrides = loadStoredData("hrShiftOverrides", {});
 importedRosterOnly = loadStoredData("hrImportedRosterOnly", false);
@@ -89,6 +90,7 @@ const sharedStorageKeys = new Set([
   "hrLastImportedMonths",
   "hrDailyPlan",
   "hrDailyPlans",
+  "hrCustomHolidays",
 ]);
 let remoteSaveTimer = null;
 let isApplyingRemoteData = false;
@@ -175,7 +177,29 @@ function normalizeNumberMap(value) {
   );
 }
 
-const holidays = {
+function normalizeHolidayMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([dateKey, name]) => [String(dateKey), String(name || "").trim()])
+      .filter(([dateKey, name]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && name)
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB)),
+  );
+}
+
+function getMergedHolidays() {
+  return normalizeHolidayMap({
+    ...defaultHolidays,
+    ...customHolidays,
+  });
+}
+
+function refreshHolidayData() {
+  customHolidays = normalizeHolidayMap(customHolidays);
+  holidays = getMergedHolidays();
+}
+
+const defaultHolidays = {
   "2024-01-01": "신정",
   "2024-02-09": "설날 연휴",
   "2024-02-10": "설날",
@@ -238,6 +262,8 @@ const holidays = {
   "2026-10-09": "한글날",
   "2026-12-25": "성탄절",
 };
+let customHolidays = normalizeHolidayMap(loadStoredData("hrCustomHolidays", {}));
+let holidays = getMergedHolidays();
 
 const weekdayShiftPositions = ["첫방", "둘방", "오전상근", "티컴", "오후상근", "막전", "막방"];
 const weekendShiftPositions = ["첫방", "둘방", "주말상근", "막전", "막방"];
@@ -341,6 +367,18 @@ const closeEmployeeManageDialog = document.querySelector("#closeEmployeeManageDi
 const newEmployeeName = document.querySelector("#newEmployeeName");
 const newEmployeeHireDate = document.querySelector("#newEmployeeHireDate");
 const addEmployeeBtn = document.querySelector("#addEmployeeBtn");
+const holidayManageBtn = document.querySelector("#holidayManageBtn");
+const holidayManageDialog = document.querySelector("#holidayManageDialog");
+const closeHolidayManageDialog = document.querySelector("#closeHolidayManageDialog");
+const holidayManageYear = document.querySelector("#holidayManageYear");
+const loadHolidayYearBtn = document.querySelector("#loadHolidayYearBtn");
+const autoLoadHolidayBtn = document.querySelector("#autoLoadHolidayBtn");
+const saveCheckedHolidaysBtn = document.querySelector("#saveCheckedHolidaysBtn");
+const holidayManageStatus = document.querySelector("#holidayManageStatus");
+const holidayManageList = document.querySelector("#holidayManageList");
+const newHolidayDate = document.querySelector("#newHolidayDate");
+const newHolidayName = document.querySelector("#newHolidayName");
+const addHolidayBtn = document.querySelector("#addHolidayBtn");
 const adminLoginBtn = document.querySelector("#adminLoginBtn");
 const adminLogoutBtn = document.querySelector("#adminLogoutBtn");
 const dailyPlanInput = document.querySelector("#dailyPlanInput");
@@ -979,6 +1017,7 @@ function getSharedDataPayload() {
     lastImportedMonths: loadStoredData("hrLastImportedMonths", []),
     dailyPlan: selectDailyPlan(),
     dailyPlans: sortDailyPlans(dailyPlans),
+    customHolidays,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -993,7 +1032,8 @@ function applySharedDataPayload(payload) {
     typeof payload.importedRosterOnly === "boolean" ||
     payload.importedRosterYear !== undefined ||
     payload.dailyPlan !== undefined ||
-    Array.isArray(payload.dailyPlans);
+    Array.isArray(payload.dailyPlans) ||
+    (payload.customHolidays && typeof payload.customHolidays === "object");
 
   if (!hasSharedData) return false;
 
@@ -1041,6 +1081,12 @@ function applySharedDataPayload(payload) {
     setDailyPlanViewToSelected();
     saveStoredData("hrDailyPlans", dailyPlans);
     saveStoredData("hrDailyPlan", dailyPlan);
+  }
+
+  if (payload.customHolidays && typeof payload.customHolidays === "object" && !Array.isArray(payload.customHolidays)) {
+    customHolidays = normalizeHolidayMap(payload.customHolidays);
+    refreshHolidayData();
+    saveStoredData("hrCustomHolidays", customHolidays);
   }
 
   isApplyingRemoteData = false;
@@ -2887,6 +2933,181 @@ function openEmployeeManagement() {
   }
 }
 
+function getHolidayManageYearValue() {
+  const fallbackYear = new Date().getFullYear();
+  const year = Number(holidayManageYear?.value || fallbackYear);
+  return Number.isFinite(year) ? Math.min(Math.max(year, 2024), 2099) : fallbackYear;
+}
+
+function getHolidayRowsForYear(year) {
+  const draftForYear = holidayDrafts[String(year)] || {};
+  return Object.entries({
+    ...holidays,
+    ...draftForYear,
+  })
+    .filter(([dateKey]) => dateKey.startsWith(`${year}-`))
+    .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+    .map(([date, name]) => ({
+      date,
+      name,
+      isCustom: Object.prototype.hasOwnProperty.call(customHolidays, date) || Object.prototype.hasOwnProperty.call(draftForYear, date),
+      isDraft: Object.prototype.hasOwnProperty.call(draftForYear, date),
+    }));
+}
+
+function renderHolidayManagement() {
+  if (!holidayManageList || !holidayManageYear) return;
+  refreshHolidayData();
+  const year = getHolidayManageYearValue();
+  holidayManageYear.value = year;
+  const rows = getHolidayRowsForYear(year);
+  holidayManageList.innerHTML = rows.length
+    ? rows
+        .map(
+          (holiday) => `
+            <div class="holiday-manage-item">
+              <label class="holiday-check-label">
+                <input type="checkbox" data-holiday-check="${holiday.date}" checked />
+                <span>반영</span>
+              </label>
+              <label>
+                날짜
+                <input type="date" value="${holiday.date}" data-holiday-date="${holiday.date}" />
+              </label>
+              <label>
+                공휴일명
+                <input type="text" value="${escapeExcelText(holiday.name)}" data-holiday-name="${holiday.date}" />
+              </label>
+              <span class="holiday-source">${holiday.isDraft ? "추가됨" : holiday.isCustom ? "저장됨" : "기본"}</span>
+            </div>
+          `,
+        )
+        .join("")
+    : `<p class="vacation-empty">등록된 공휴일이 없습니다. 자동 불러오기 또는 직접 추가를 사용해주세요.</p>`;
+}
+
+function saveHolidayData(statusText = "공휴일이 저장됐습니다.") {
+  refreshHolidayData();
+  saveStoredData("hrCustomHolidays", customHolidays);
+  render();
+  renderHolidayManagement();
+  if (holidayManageStatus) holidayManageStatus.textContent = statusText;
+  saveRemoteDataInBackground("공휴일 정보는 이 기기에는 반영됐지만 서버 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.");
+}
+
+function saveHolidayEntry(originalDate, nextDate, nextName) {
+  if (!requireAdmin("공휴일 관리는 관리자만 사용할 수 있습니다.")) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate || "") || !String(nextName || "").trim()) {
+    alert("날짜와 공휴일명을 확인해주세요.");
+    return;
+  }
+  if (originalDate && customHolidays[originalDate]) {
+    delete customHolidays[originalDate];
+  }
+  customHolidays[nextDate] = String(nextName).trim();
+  saveHolidayData("공휴일이 저장됐습니다.");
+}
+
+function addHolidayDraft() {
+  if (!requireAdmin("공휴일 관리는 관리자만 사용할 수 있습니다.")) return;
+  const dateKey = newHolidayDate.value;
+  const name = newHolidayName.value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || "") || !name) {
+    alert("날짜와 공휴일명을 확인해주세요.");
+    return;
+  }
+  const year = dateKey.slice(0, 4);
+  holidayManageYear.value = year;
+  holidayDrafts[year] = normalizeHolidayMap({
+    ...(holidayDrafts[year] || {}),
+    [dateKey]: name,
+  });
+  newHolidayDate.value = "";
+  newHolidayName.value = "";
+  renderHolidayManagement();
+  if (holidayManageStatus) holidayManageStatus.textContent = "목록에 추가했습니다. 체크된 공휴일 저장을 눌러 반영해주세요.";
+}
+
+function saveCheckedHolidaysForYear() {
+  if (!requireAdmin("공휴일 관리는 관리자만 사용할 수 있습니다.")) return;
+  const year = getHolidayManageYearValue();
+  const nextYearHolidays = {};
+  holidayManageList.querySelectorAll(".holiday-manage-item").forEach((item) => {
+    const checkbox = item.querySelector("[data-holiday-check]");
+    if (!checkbox?.checked) return;
+    const originalDate = checkbox.dataset.holidayCheck;
+    const dateValue = item.querySelector(`[data-holiday-date="${originalDate}"]`)?.value;
+    const nameValue = item.querySelector(`[data-holiday-name="${originalDate}"]`)?.value?.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue || "") && nameValue && dateValue.startsWith(`${year}-`)) {
+      nextYearHolidays[dateValue] = nameValue;
+    }
+  });
+
+  if (!Object.keys(nextYearHolidays).length) {
+    alert("저장할 공휴일을 체크해주세요.");
+    return;
+  }
+
+  Object.keys(customHolidays)
+    .filter((dateKey) => dateKey.startsWith(`${year}-`))
+    .forEach((dateKey) => {
+      delete customHolidays[dateKey];
+    });
+
+  customHolidays = normalizeHolidayMap({
+    ...customHolidays,
+    ...nextYearHolidays,
+  });
+  holidayDrafts[String(year)] = {};
+  saveHolidayData(`${year}년 체크된 공휴일 ${Object.keys(nextYearHolidays).length}개를 저장했습니다.`);
+}
+
+async function autoLoadHolidaysForYear() {
+  if (!requireAdmin("공휴일 관리는 관리자만 사용할 수 있습니다.")) return;
+  const year = getHolidayManageYearValue();
+  if (holidayManageStatus) holidayManageStatus.textContent = "공휴일을 불러오는 중입니다...";
+
+  try {
+    const response = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/KR`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`holiday api ${response.status}`);
+    const items = await response.json();
+    const imported = {};
+    items.forEach((item) => {
+      if (item?.date && item?.localName) {
+        imported[item.date] = item.localName;
+      }
+    });
+    if (!Object.keys(imported).length) throw new Error("empty holiday result");
+    holidayDrafts[String(year)] = normalizeHolidayMap({
+      ...(holidayDrafts[String(year)] || {}),
+      ...imported,
+    });
+    renderHolidayManagement();
+    if (holidayManageStatus) {
+      holidayManageStatus.textContent = `${year}년 공휴일 ${Object.keys(imported).length}개를 불러왔습니다. 체크 후 저장해주세요.`;
+    }
+  } catch (error) {
+    console.warn("Holiday auto load failed", error);
+    if (holidayManageStatus) {
+      holidayManageStatus.textContent = "자동 불러오기에 실패했습니다. 직접 추가하거나 나중에 다시 시도해주세요.";
+    }
+  }
+}
+
+function openHolidayManagement() {
+  if (!requireAdmin()) return;
+  if (holidayManageYear && !holidayManageYear.value) {
+    holidayManageYear.value = new Date().getFullYear() + 1;
+  }
+  if (holidayManageStatus) holidayManageStatus.textContent = "";
+  renderHolidayManagement();
+  if (typeof holidayManageDialog.showModal === "function") {
+    holidayManageDialog.showModal();
+  } else {
+    holidayManageDialog.setAttribute("open", "");
+  }
+}
+
 function addEmployee() {
   const name = newEmployeeName.value.trim();
   if (!name) {
@@ -3417,6 +3638,20 @@ closeEmployeeManageDialog.addEventListener("click", () => {
     employeeManageDialog.close();
   } else {
     employeeManageDialog.removeAttribute("open");
+  }
+});
+
+holidayManageBtn.addEventListener("click", openHolidayManagement);
+loadHolidayYearBtn.addEventListener("click", renderHolidayManagement);
+autoLoadHolidayBtn.addEventListener("click", autoLoadHolidaysForYear);
+saveCheckedHolidaysBtn.addEventListener("click", saveCheckedHolidaysForYear);
+addHolidayBtn.addEventListener("click", addHolidayDraft);
+holidayManageYear.addEventListener("change", renderHolidayManagement);
+closeHolidayManageDialog.addEventListener("click", () => {
+  if (holidayManageDialog.open) {
+    holidayManageDialog.close();
+  } else {
+    holidayManageDialog.removeAttribute("open");
   }
 });
 
