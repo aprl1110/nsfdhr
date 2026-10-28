@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { verifyAdmin } from "./lib/admin-auth.js";
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -6,7 +7,6 @@ const headers = {
   "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
   "Cache-Control": "no-store",
 };
-const adminWriteKey = "chlqudgns12!";
 const maxChunkSize = 4 * 1024 * 1024;
 
 function jsonResponse(body, status = 200) {
@@ -56,7 +56,7 @@ export default async (request) => {
   }
 
   if (request.method === "POST") {
-    if (request.headers.get("x-admin-key") !== adminWriteKey) {
+    if (!(await verifyAdmin(request))) {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
@@ -77,7 +77,7 @@ export default async (request) => {
   }
 
   if (request.method === "DELETE") {
-    if (request.headers.get("x-admin-key") !== adminWriteKey) {
+    if (!(await verifyAdmin(request))) {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 

@@ -1,4 +1,5 @@
 import { getStore } from "@netlify/blobs";
+import { verifyAdmin, handleAdminAction } from "./lib/admin-auth.js";
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -7,7 +8,6 @@ const headers = {
   "Content-Type": "application/json; charset=utf-8",
   "Cache-Control": "no-store",
 };
-const adminWriteKey = "chlqudgns12!";
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers });
@@ -33,6 +33,8 @@ function normalizePayload(payload) {
     lastImportedMonths: Array.isArray(payload.lastImportedMonths) ? payload.lastImportedMonths : [],
     dailyPlan,
     dailyPlans,
+    customHolidays: payload.customHolidays && typeof payload.customHolidays === "object" && !Array.isArray(payload.customHolidays)
+      ? payload.customHolidays : {},
     updatedAt: new Date().toISOString(),
   };
 }
@@ -50,7 +52,12 @@ export default async (request) => {
   }
 
   if (request.method === "POST") {
-    if (request.headers.get("x-admin-key") !== adminWriteKey) {
+    const action = new URL(request.url).searchParams.get("action");
+    if (["login", "session", "change-password"].includes(action)) {
+      const result = await handleAdminAction(request, action);
+      return jsonResponse(result.body, result.status);
+    }
+    if (!(await verifyAdmin(request))) {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
