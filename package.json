@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check app.js && node --check netlify/functions/hr-data.js && node --check netlify/functions/daily-plan-file.js"
+    "check": "node --check app.js && node --check netlify/functions/hr-data.js && node --check netlify/functions/daily-plan-file.js && node --check netlify/functions/lib/admin-auth.js",
+    "test": "node --experimental-vm-modules --test tests/hr-updates.test.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0"

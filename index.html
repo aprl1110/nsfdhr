@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HR Calendar</title>
-    <link rel="stylesheet" href="styles.css?v=holiday-check-save-1" />
+    <link rel="stylesheet" href="styles.css?v=employee-tabs-20261028" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,6 +19,7 @@
           <button id="dailyPlanListBtn" class="text-button admin-only" type="button">계획서 목록</button>
           <button id="employeeManageBtn" class="text-button admin-only" type="button">직원관리</button>
           <button id="holidayManageBtn" class="text-button admin-only" type="button">공휴일관리</button>
+          <button id="changePasswordBtn" class="text-button admin-only" type="button">비밀번호 변경</button>
           <button id="adminLogoutBtn" class="text-button" type="button" hidden>로그아웃</button>
           <div id="dailyPlanUploadProgress" class="upload-progress admin-only" hidden>
             <div class="upload-progress-row">
@@ -299,7 +300,11 @@
           </button>
         </div>
 
-        <div id="employeeManageList" class="employee-manage-list"></div>
+        <div class="employee-manage-tabs" role="tablist" aria-label="직원 상태">
+          <button id="activeEmployeesTab" class="text-button" type="button" role="tab" aria-selected="true" aria-controls="employeeManageList">재직자</button>
+          <button id="retiredEmployeesTab" class="text-button" type="button" role="tab" aria-selected="false" aria-controls="employeeManageList">퇴사자</button>
+        </div>
+        <div id="employeeManageList" class="employee-manage-list" role="tabpanel"></div>
 
         <div class="employee-hire-box">
           <h3>입사 처리</h3>
@@ -315,6 +320,35 @@
             <button id="addEmployeeBtn" class="primary-button" type="button">입사 등록</button>
           </div>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="adminAuthDialog" class="employee-manage-dialog auth-dialog">
+      <form id="adminAuthForm" class="employee-manage-card">
+        <div class="dialog-header">
+          <h2 id="adminAuthTitle">관리자 로그인</h2>
+          <button id="closeAdminAuthDialog" class="icon-button" type="button" aria-label="닫기">×</button>
+        </div>
+        <label><span id="currentPasswordLabel">비밀번호</span><input id="currentAdminPassword" type="password" autocomplete="current-password" maxlength="256" required /></label>
+        <div id="newPasswordFields" hidden>
+          <label>새 비밀번호<input id="newAdminPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" /></label>
+          <label>새 비밀번호 확인<input id="confirmAdminPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" /></label>
+        </div>
+        <p id="adminAuthStatus" role="status"></p>
+        <div class="dialog-actions"><button id="submitAdminAuth" class="primary-button" type="submit">로그인</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="addLeaveSeasonDialog" class="employee-manage-dialog auth-dialog">
+      <form id="addLeaveSeasonForm" class="employee-manage-card">
+        <div class="dialog-header">
+          <h2>연차 시즌 추가</h2>
+          <button id="closeAddLeaveSeasonDialog" class="icon-button" type="button" aria-label="닫기">×</button>
+        </div>
+        <label>시즌 시작 연도<input id="leaveSeasonYear" type="number" min="1900" max="2200" step="1" required /></label>
+        <p id="leaveSeasonPeriod" role="status"></p>
+        <label>연차 총개수<input id="leaveSeasonTotal" type="number" min="0" max="999" step="0.5" value="15" required /></label>
+        <div class="dialog-actions"><button class="primary-button" type="submit">추가</button></div>
       </form>
     </dialog>
 
@@ -360,6 +394,16 @@
       </form>
     </dialog>
 
+    <dialog id="retiredVacationDialog" class="vacation-history-dialog">
+      <div class="vacation-history-card">
+        <div class="dialog-header">
+          <h2>퇴사자 휴가 정보</h2>
+          <button id="closeRetiredVacationDialog" class="icon-button" type="button" aria-label="닫기">×</button>
+        </div>
+        <div id="retiredVacationDetail" class="vacation-history-body"></div>
+      </div>
+    </dialog>
+
     <dialog id="vacationHistoryDialog" class="vacation-history-dialog">
       <div class="vacation-history-card">
         <div class="dialog-header">
@@ -377,6 +421,6 @@
     </dialog>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="app.js?v=holiday-check-save-1"></script>
+    <script src="app.js?v=employee-labels-20261028"></script>
   </body>
 </html>

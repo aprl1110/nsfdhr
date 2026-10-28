@@ -65,14 +65,15 @@ dailyPlan = dailyPlans[0] || dailyPlan;
 const isLocalPreview =
   window.location.protocol === "file:" || ["", "127.0.0.1", "localhost"].includes(window.location.hostname);
 const isNetlifyHost = window.location.hostname.endsWith("netlify.app");
-const remoteDataEndpoint = isNetlifyHost
+const hasLocalPreviewApi = isLocalPreview && window.NSFDHR_LOCAL_API === true;
+const remoteDataEndpoint = isNetlifyHost || hasLocalPreviewApi
   ? "/.netlify/functions/hr-data"
   : isLocalPreview
     ? "https://nsfdhr.netlify.app/.netlify/functions/hr-data"
     : "/api/hr-data";
-const adminPassword = "chlqudgns12!";
 const adminSessionKey = "hrAdminMode";
-const dailyPlanFileEndpoint = isNetlifyHost
+let adminCredential = sessionStorage.getItem("hrAdminCredential") || "";
+const dailyPlanFileEndpoint = isNetlifyHost || hasLocalPreviewApi
   ? "/.netlify/functions/daily-plan-file"
   : isLocalPreview
     ? "https://nsfdhr.netlify.app/.netlify/functions/daily-plan-file"
@@ -94,7 +95,10 @@ const sharedStorageKeys = new Set([
 ]);
 let remoteSaveTimer = null;
 let isApplyingRemoteData = false;
-let isAdmin = sessionStorage.getItem(adminSessionKey) === "true";
+let isAdmin = false;
+let employeeManagementTab = "active";
+let authDialogMode = "login";
+let addingSeasonEmployeeId = "";
 let activePage = "home";
 let lastShownDailyPlanStamp = "";
 let dailyPlanAutoShown = false;
@@ -125,6 +129,7 @@ function normalizeEmployees(employeeList = []) {
         ? Number(employee.annualLeaveAdjustment)
         : 0,
       annualLeaveAdjustments: normalizeNumberMap(employee.annualLeaveAdjustments),
+      manualAnnualSeasonStarts: normalizeDateList(employee.manualAnnualSeasonStarts),
       substituteEarnedDates: normalizeDateList(employee.substituteEarnedDates),
       substituteEarnedRemovedDates: normalizeDateList(employee.substituteEarnedRemovedDates),
       hiddenVacationItems: normalizeStringList(employee.hiddenVacationItems),
@@ -305,6 +310,7 @@ let currentDate = new Date(today.getFullYear(), today.getMonth(), 1);
 let selectedDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 let selectedEmployeeId = "all";
 let selectedVacationEmployeeId = "";
+let selectedRetiredEmployeeId = "";
 
 const calendarGrid = document.querySelector("#calendarGrid");
 const monthTitle = document.querySelector("#monthTitle");
@@ -448,6 +454,9 @@ function setAdminMode(nextValue) {
     sessionStorage.setItem(adminSessionKey, "true");
   } else {
     sessionStorage.removeItem(adminSessionKey);
+    sessionStorage.removeItem("hrAdminCredential");
+    adminCredential = "";
+    document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
   }
   updateAdminUi();
   render();
@@ -563,7 +572,7 @@ async function deleteDailyPlanFile(plan) {
     try {
       await fetch(`${dailyPlanFileEndpoint}?id=${encodeURIComponent(plan.fileId)}&part=${partIndex}`, {
         method: "DELETE",
-        headers: { "X-Admin-Key": adminPassword },
+        headers: { "X-Admin-Key": adminCredential },
       });
     } catch (error) {
       console.warn("Daily plan delete failed", error);
@@ -585,7 +594,7 @@ async function uploadDailyPlanFile(file) {
       method: "POST",
       headers: {
         "Content-Type": "application/octet-stream",
-        "X-Admin-Key": adminPassword,
+        "X-Admin-Key": adminCredential,
         "X-File-Name": encodeURIComponent(file.name),
         "X-File-Type": file.type || "application/octet-stream",
         "X-Part-Count": String(partCount),
@@ -988,7 +997,7 @@ function openCalendarToday() {
 
 function loadStoredData(key, fallback) {
   try {
-    const storedValue = localStorage.getItem(key);
+    const storedValue = localStorage.getItem(window.NSFDHR_LOCAL_API ? `preview:${key}` : key);
     return storedValue ? JSON.parse(storedValue) : fallback;
   } catch {
     return fallback;
@@ -997,7 +1006,7 @@ function loadStoredData(key, fallback) {
 
 function saveStoredData(key, value) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(window.NSFDHR_LOCAL_API ? `preview:${key}` : key, JSON.stringify(value));
   } catch (error) {
     console.warn("Local save failed", error);
   }
@@ -1107,15 +1116,17 @@ function queueRemoteSave() {
 async function saveRemoteData() {
   window.clearTimeout(remoteSaveTimer);
   remoteSaveTimer = null;
+  if (!isAdmin || !adminCredential) return false;
 
   try {
     const response = await fetch(remoteDataEndpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Admin-Key": adminPassword },
+      headers: { "Content-Type": "application/json", "X-Admin-Key": adminCredential },
       body: JSON.stringify(getSharedDataPayload()),
     });
 
     if (!response.ok) {
+      if (response.status === 401) setAdminMode(false);
       throw new Error(`Remote save failed with ${response.status}`);
     }
     return true;
@@ -1896,8 +1907,7 @@ function moveEmployeeOrder(employeeId, direction) {
 }
 
 function getVacationVisibleEmployees() {
-  const visibleEmployees = isAdmin ? employees : employees.filter(isEmployeeActive);
-  return sortEmployeesWithInactiveLast(visibleEmployees);
+  return sortEmployeesWithInactiveLast(employees.filter(isEmployeeActive));
 }
 
 function saveEmployees() {
@@ -2287,13 +2297,19 @@ function getAnnualAdjustmentSeasonIndex(employee, asOfDate) {
 function getLeaveSeasons(employee, asOfDate = new Date()) {
   const hireDate = getHireDate(employee);
   if (!hireDate) return [];
+  if (employee.exitDate && employee.exitDate < toDateKey(asOfDate)) asOfDate = fromDateKey(employee.exitDate);
 
   const annualUses = getEmployeeVacationEvents(employee.id, "annual");
   const monthlyUses = getEmployeeVacationEvents(employee.id, "monthly");
   const adjustmentSeasonIndex = getAnnualAdjustmentSeasonIndex(employee, asOfDate);
-  const maxSeasonIndex = Math.max(countPassedAnnualAnniversaries(hireDate, asOfDate), 1);
+  const maxSeasonIndex = Math.max(countPassedAnnualAnniversaries(hireDate, asOfDate), employee.exitDate ? 0 : 1);
+  const seasonIndices = new Set(Array.from({ length: maxSeasonIndex + 1 }, (_, index) => index));
+  for (const startKey of employee.manualAnnualSeasonStarts || []) {
+    const index = Number(startKey.slice(0, 4)) - hireDate.getFullYear();
+    if (index >= 1 && index <= 200 && toDateKey(addYearsClamped(hireDate, index)) === startKey) seasonIndices.add(index);
+  }
 
-  return Array.from({ length: maxSeasonIndex + 1 }, (_, seasonIndex) => {
+  return [...seasonIndices].sort((a, b) => a - b).map((seasonIndex) => {
     const startDate = addYearsClamped(hireDate, seasonIndex);
     const endDate = addYearsClamped(hireDate, seasonIndex + 1);
     endDate.setDate(endDate.getDate() - 1);
@@ -2309,7 +2325,8 @@ function getLeaveSeasons(employee, asOfDate = new Date()) {
     const storedAdjustment = getAnnualLeaveAdjustment(employee, startKey);
     const legacyAdjustment = seasonIndex === adjustmentSeasonIndex ? getAnnualLeaveAdjustment(employee) : 0;
     const annualAdjustment = hasStoredAdjustment ? storedAdjustment : legacyAdjustment;
-    const annualTotal = seasonIndex >= 1 && startDate <= asOfDate ? Math.max(defaultAnnualLeaveTotal + annualAdjustment, 0) : 0;
+    const isManualSeason = employee.manualAnnualSeasonStarts?.includes(startKey);
+    const annualTotal = seasonIndex >= 1 && (startDate <= asOfDate || isManualSeason) ? Math.max(defaultAnnualLeaveTotal + annualAdjustment, 0) : 0;
 
     return {
       id: `leave-season-${seasonIndex}`,
@@ -2333,6 +2350,7 @@ function getLeaveSeasons(employee, asOfDate = new Date()) {
 function getSubstituteYearSummaries(employee, asOfDate = new Date()) {
   const employeeId = employee?.id;
   if (!employeeId) return [];
+  if (employee.exitDate && employee.exitDate < toDateKey(asOfDate)) asOfDate = fromDateKey(employee.exitDate);
   const holidayWorks = getHolidayWorkDates(employeeId);
   const usesByEarnedDate = getSubstituteUsesByEarnedDate(employeeId);
   const hireDate = getHireDate(employee);
@@ -2422,7 +2440,7 @@ function renderSubstituteYearCards(yearSummaries) {
   `;
 }
 
-function openVacationHistoryDialog({ eyebrow, title, period, bodyHtml }) {
+function openVacationHistoryDialog({ employeeId, eyebrow, title, period, bodyHtml }) {
   if (!vacationHistoryDialog || !vacationHistoryBody) return;
   vacationHistoryEyebrow.textContent = eyebrow;
   vacationHistoryTitle.textContent = title;
@@ -2497,7 +2515,7 @@ function openVacationHistoryDialog({ eyebrow, title, period, bodyHtml }) {
   vacationHistoryBody.querySelectorAll("[data-remove-earned-date]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      removeSubstituteEarnedDate(selectedVacationEmployeeId, button.dataset.removeEarnedDate);
+      removeSubstituteEarnedDate(employeeId, button.dataset.removeEarnedDate);
       vacationHistoryDialog.close();
     });
   });
@@ -2530,7 +2548,7 @@ function openVacationHistoryDialog({ eyebrow, title, period, bodyHtml }) {
         alert("대체휴무 사용 날짜를 선택해주세요.");
         return;
       }
-      saveSubstituteUse(selectedVacationEmployeeId, button.dataset.saveSubstituteUse, picker.value);
+      saveSubstituteUse(employeeId, button.dataset.saveSubstituteUse, picker.value);
       vacationHistoryDialog.close();
     });
   });
@@ -2700,6 +2718,7 @@ function openLeaveSeasonHistory(employee, season) {
     `;
 
   openVacationHistoryDialog({
+    employeeId: employee.id,
     eyebrow: `${employee.name} 휴가 시즌`,
     title: `${season.label} ${isMonthlySeason ? "월차" : "연차"}`,
     period: `${season.startKey} ~ ${season.endKey}`,
@@ -2765,6 +2784,7 @@ function openSubstituteYearHistory(employee, summary) {
     : "";
 
   openVacationHistoryDialog({
+    employeeId: employee.id,
     eyebrow: `${employee.name} 대체휴무`,
     title: `[${summary.year}] 대체휴무`,
     period: `${summary.year}년 공휴일 근무 기준`,
@@ -2821,6 +2841,10 @@ function renderVacationPage() {
     return;
   }
 
+  renderEmployeeVacationDetail(vacationDetail, selectedEmployee);
+}
+
+function renderEmployeeVacationDetail(vacationDetail, selectedEmployee) {
   const today = fromDateKey(getTodayDateKey());
   const leaveSeasons = getLeaveSeasons(selectedEmployee, today);
   const substituteYearSummaries = getSubstituteYearSummaries(selectedEmployee, today);
@@ -2836,6 +2860,7 @@ function renderVacationPage() {
 
     <section class="vacation-section">
       <h4>월차 · 연차 시즌</h4>
+      ${isAdmin && isEmployeeActive(selectedEmployee) ? `<button data-add-leave-season class="text-button" type="button">+ 연차 시즌 추가</button>` : ""}
       ${renderLeaveSeasonCards(leaveSeasons)}
     </section>
 
@@ -2844,6 +2869,8 @@ function renderVacationPage() {
       ${renderSubstituteYearCards(substituteYearSummaries)}
     </section>
   `;
+
+  vacationDetail.querySelector("[data-add-leave-season]")?.addEventListener("click", () => openAddLeaveSeason(selectedEmployee));
 
   vacationDetail.querySelectorAll("[data-vacation-season]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2860,12 +2887,38 @@ function renderVacationPage() {
   });
 }
 
+function renderRetiredVacationInfo() {
+  const dialog = document.querySelector("#retiredVacationDialog");
+  if (!dialog.open) return;
+  const employee = getEmployee(selectedRetiredEmployeeId);
+  if (!isAdmin || !employee?.exitDate) { dialog.close(); return; }
+  renderEmployeeVacationDetail(document.querySelector("#retiredVacationDetail"), employee);
+}
+
+function openRetiredVacationInfo(employeeId) {
+  if (!requireAdmin()) return;
+  const employee = getEmployee(employeeId);
+  if (!employee?.exitDate) return;
+  selectedRetiredEmployeeId = employeeId;
+  const dialog = document.querySelector("#retiredVacationDialog");
+  dialog.showModal();
+  renderRetiredVacationInfo();
+}
+
 function renderEmployeeManagement() {
   if (!employeeManageList) return;
-
+  const retired = employeeManagementTab === "retired";
+  document.querySelector("#activeEmployeesTab").setAttribute("aria-selected", String(!retired));
+  document.querySelector("#retiredEmployeesTab").setAttribute("aria-selected", String(retired));
+  document.querySelector("#activeEmployeesTab").textContent = "재직자";
+  document.querySelector("#retiredEmployeesTab").textContent = "퇴사자";
+  employeeManageList.setAttribute("aria-labelledby", retired ? "retiredEmployeesTab" : "activeEmployeesTab");
+  document.querySelector(".employee-hire-box").hidden = retired;
   employeeManageList.innerHTML = "";
-  sortEmployeesWithInactiveLast(employees).forEach((employee) => {
-    const orderedEmployees = sortEmployeesWithInactiveLast(employees);
+  const filteredEmployees = employees.filter((employee) => isEmployeeActive(employee) !== retired);
+  if (!filteredEmployees.length) employeeManageList.innerHTML = `<p class="vacation-empty">${retired ? "퇴사자가 없습니다." : "재직자가 없습니다."}</p>`;
+  sortEmployeesWithInactiveLast(filteredEmployees).forEach((employee) => {
+    const orderedEmployees = sortEmployeesWithInactiveLast(filteredEmployees);
     const employeeIndex = orderedEmployees.findIndex((orderedEmployee) => orderedEmployee.id === employee.id);
     const prevEmployee = orderedEmployees[employeeIndex - 1];
     const nextEmployee = orderedEmployees[employeeIndex + 1];
@@ -2892,10 +2945,14 @@ function renderEmployeeManagement() {
         </label>
       </div>
       <div class="employee-manage-actions">
-        <button class="secondary-button employee-order-button" type="button" data-action="up" ${canMoveUp ? "" : "disabled"}>위</button>
-        <button class="secondary-button employee-order-button" type="button" data-action="down" ${canMoveDown ? "" : "disabled"}>아래</button>
+        ${retired ? "" : `
+          <button class="secondary-button employee-order-button" type="button" data-action="up" ${canMoveUp ? "" : "disabled"}>위</button>
+          <button class="secondary-button employee-order-button" type="button" data-action="down" ${canMoveDown ? "" : "disabled"}>아래</button>
+        `}
         <button class="secondary-button" type="button" data-action="save">저장</button>
-        <button class="danger-button" type="button" data-action="exit">퇴사 처리</button>
+        ${retired
+          ? `<button class="secondary-button" type="button" data-action="vacation">휴가정보</button>`
+          : `<button class="danger-button" type="button" data-action="exit">퇴사 처리</button>`}
       </div>
     `;
 
@@ -2908,16 +2965,28 @@ function renderEmployeeManagement() {
     });
 
     item.querySelector('[data-action="save"]')?.addEventListener("click", () => {
-      employee.hireDate = item.querySelector('[data-field="hireDate"]')?.value || "";
-      employee.exitDate = item.querySelector('[data-field="exitDate"]')?.value || "";
+      if (!requireAdmin()) return;
+      const hireDate = item.querySelector('[data-field="hireDate"]')?.value || "";
+      const exitDate = item.querySelector('[data-field="exitDate"]')?.value || "";
+      if (retired && !exitDate) { alert("퇴사 날짜를 입력해주세요."); return; }
+      if (exitDate && hireDate && exitDate < hireDate) { alert("퇴사 날짜는 입사 날짜 이후로 선택해주세요."); return; }
+      employee.hireDate = hireDate;
+      employee.exitDate = exitDate;
       saveEmployees();
     });
 
     item.querySelector('[data-action="exit"]')?.addEventListener("click", () => {
-      employee.hireDate = item.querySelector('[data-field="hireDate"]')?.value || employee.hireDate || "";
-      employee.exitDate = item.querySelector('[data-field="exitDate"]')?.value || toDateKey(new Date());
+      if (!requireAdmin()) return;
+      const hireDate = item.querySelector('[data-field="hireDate"]')?.value || employee.hireDate || "";
+      const exitDate = item.querySelector('[data-field="exitDate"]')?.value || toDateKey(new Date());
+      if (hireDate && exitDate < hireDate) { alert("퇴사 날짜는 입사 날짜 이후로 선택해주세요."); return; }
+      if (!confirm(`${employee.name} 님을 ${exitDate} 퇴사 처리할까요?`)) return;
+      employee.hireDate = hireDate;
+      employee.exitDate = exitDate;
       saveEmployees();
     });
+
+    item.querySelector('[data-action="vacation"]')?.addEventListener("click", () => openRetiredVacationInfo(employee.id));
 
     employeeManageList.appendChild(item);
   });
@@ -2925,6 +2994,7 @@ function renderEmployeeManagement() {
 
 function openEmployeeManagement() {
   if (!requireAdmin()) return;
+  employeeManagementTab = "active";
   renderEmployeeManagement();
   if (typeof employeeManageDialog.showModal === "function") {
     employeeManageDialog.showModal();
@@ -3357,6 +3427,7 @@ function render() {
   if (activePage === "vacation") {
     renderVacationPage();
   }
+  renderRetiredVacationInfo();
 }
 
 document.querySelector("#prevMonth").addEventListener("click", () => {
@@ -3544,17 +3615,145 @@ requestForm.addEventListener("submit", (event) => {
   saveRemoteDataInBackground("휴가 신청은 이 기기에는 반영됐지만 서버 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.");
 });
 
-adminLoginBtn.addEventListener("click", () => {
-  const password = window.prompt("관리자 비밀번호를 입력해주세요.");
-  if (password === null) return;
+async function adminRequest(action, input = {}) {
+  const response = await fetch(`${remoteDataEndpoint}?action=${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Key": adminCredential },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "관리자 로그인 상태를 확인해주세요.");
+  if (!result.ok) throw new Error("서버 업데이트가 필요합니다. 최신 파일을 배포한 뒤 다시 시도해주세요.");
+  return result;
+}
 
-  if (password === adminPassword) {
-    setAdminMode(true);
-    alert("관리자 모드로 전환했습니다.");
+async function restoreAdminSession() {
+  if (!adminCredential) return;
+  const credential = adminCredential;
+  try {
+    await adminRequest("session");
+    if (credential === adminCredential) setAdminMode(true);
+  } catch {
+    if (credential === adminCredential) setAdminMode(false);
+  }
+}
+
+function openAdminAuth(mode) {
+  if (mode === "change-password" && !requireAdmin()) return;
+  authDialogMode = mode;
+  const changing = mode === "change-password";
+  document.querySelector("#adminAuthForm").reset();
+  document.querySelector("#adminAuthTitle").textContent = changing ? "비밀번호 변경" : "관리자 로그인";
+  document.querySelector("#currentPasswordLabel").textContent = changing ? "현재 비밀번호" : "비밀번호";
+  document.querySelector("#newPasswordFields").hidden = !changing;
+  document.querySelector("#newAdminPassword").required = changing;
+  document.querySelector("#confirmAdminPassword").required = changing;
+  document.querySelector("#adminAuthStatus").textContent = "";
+  document.querySelector("#submitAdminAuth").textContent = changing ? "변경" : "로그인";
+  document.querySelector("#adminAuthDialog").showModal();
+}
+
+document.querySelector("#adminAuthForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const changing = authDialogMode === "change-password";
+  const submit = document.querySelector("#submitAdminAuth");
+  const status = document.querySelector("#adminAuthStatus");
+  const password = document.querySelector("#currentAdminPassword").value;
+  const newPassword = document.querySelector("#newAdminPassword").value;
+  if (changing && newPassword !== document.querySelector("#confirmAdminPassword").value) {
+    status.textContent = "새 비밀번호가 서로 다릅니다.";
     return;
   }
+  submit.disabled = true;
+  status.textContent = changing ? "변경 중…" : "로그인 중…";
+  try {
+    if (changing && remoteSaveTimer !== null && !(await saveRemoteData())) throw new Error("저장 중인 변경을 먼저 서버에 반영한 뒤 다시 시도해주세요.");
+    const result = await adminRequest(authDialogMode, { password, ...(changing ? { newPassword } : {}) });
+    document.querySelector("#adminAuthDialog").close();
+    document.querySelector("#adminAuthForm").reset();
+    if (changing) {
+      setAdminMode(false);
+      alert("비밀번호를 변경했습니다. 새 비밀번호로 다시 로그인해주세요. 다른 기기의 관리자 로그인도 해제됩니다.");
+    } else {
+      if (typeof result.token !== "string" || !result.token) throw new Error("서버 업데이트 후 다시 로그인해주세요.");
+      adminCredential = result.token;
+      sessionStorage.setItem("hrAdminCredential", adminCredential);
+      await loadRemoteData();
+      setAdminMode(true);
+    }
+  } catch (error) {
+    status.textContent = error.message || "서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.";
+  } finally {
+    submit.disabled = false;
+  }
+});
 
-  alert("비밀번호가 맞지 않습니다.");
+adminLoginBtn.addEventListener("click", () => openAdminAuth("login"));
+document.querySelector("#changePasswordBtn").addEventListener("click", () => openAdminAuth("change-password"));
+document.querySelector("#closeAdminAuthDialog").addEventListener("click", () => document.querySelector("#adminAuthDialog").close());
+document.querySelector("#adminAuthDialog").addEventListener("close", () => document.querySelector("#adminAuthForm").reset());
+document.querySelector("#activeEmployeesTab").addEventListener("click", () => {
+  employeeManagementTab = "active";
+  renderEmployeeManagement();
+});
+document.querySelector("#retiredEmployeesTab").addEventListener("click", () => {
+  employeeManagementTab = "retired";
+  renderEmployeeManagement();
+});
+
+function updateLeaveSeasonPeriod() {
+  const employee = getEmployee(addingSeasonEmployeeId);
+  const hireDate = getHireDate(employee);
+  const year = Number(document.querySelector("#leaveSeasonYear").value);
+  if (!hireDate || !Number.isInteger(year) || year <= hireDate.getFullYear() || year > 2200) {
+    document.querySelector("#leaveSeasonPeriod").textContent = "입사 다음 해 이후의 시즌 시작 연도를 입력해주세요.";
+    return;
+  }
+  const start = addYearsClamped(hireDate, year - hireDate.getFullYear());
+  const end = addYearsClamped(hireDate, year - hireDate.getFullYear() + 1);
+  end.setDate(end.getDate() - 1);
+  document.querySelector("#leaveSeasonPeriod").textContent = `${getSeasonLabel(start, end)} · ${toDateKey(start)} ~ ${toDateKey(end)}`;
+}
+
+function openAddLeaveSeason(employee) {
+  if (!requireAdmin()) return;
+  const hireDate = getHireDate(employee);
+  if (!hireDate) { alert("직원관리에서 입사 날짜를 먼저 등록해주세요."); return; }
+  addingSeasonEmployeeId = employee.id;
+  const seasons = getLeaveSeasons(employee);
+  const lastIndex = Math.max(...seasons.filter((season) => season.annualTotal > 0 || employee.manualAnnualSeasonStarts?.includes(season.startKey)).map((season) => season.seasonIndex), 0);
+  const input = document.querySelector("#leaveSeasonYear");
+  input.min = String(hireDate.getFullYear() + 1);
+  input.max = String(Math.min(hireDate.getFullYear() + 200, 2200));
+  input.value = String(hireDate.getFullYear() + lastIndex + 1);
+  document.querySelector("#leaveSeasonTotal").value = String(defaultAnnualLeaveTotal);
+  updateLeaveSeasonPeriod();
+  document.querySelector("#addLeaveSeasonDialog").showModal();
+}
+
+document.querySelector("#leaveSeasonYear").addEventListener("input", updateLeaveSeasonPeriod);
+document.querySelector("#closeAddLeaveSeasonDialog").addEventListener("click", () => document.querySelector("#addLeaveSeasonDialog").close());
+document.querySelector("#addLeaveSeasonForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!requireAdmin()) return;
+  const employee = getEmployee(addingSeasonEmployeeId);
+  const hireDate = getHireDate(employee);
+  if (!hireDate) return;
+  const year = Number(document.querySelector("#leaveSeasonYear").value);
+  const total = Number(document.querySelector("#leaveSeasonTotal").value);
+  const index = year - hireDate.getFullYear();
+  if (!Number.isInteger(index) || index < 1 || index > 200 || year > 2200 || !Number.isFinite(total) || total < 0 || total > 999 || total * 2 % 1 !== 0) {
+    alert("시작 연도와 연차 총개수를 확인해주세요."); return;
+  }
+  const startKey = toDateKey(addYearsClamped(hireDate, index));
+  if (startKey <= getTodayDateKey() || employee.manualAnnualSeasonStarts?.includes(startKey)) {
+    alert("이미 있는 시즌입니다. 해당 시즌을 눌러 연차를 조정해주세요."); return;
+  }
+  employee.manualAnnualSeasonStarts = normalizeDateList([...(employee.manualAnnualSeasonStarts || []), startKey]);
+  setAnnualLeaveAdjustment(employee, startKey, total - defaultAnnualLeaveTotal);
+  saveEmployees();
+  document.querySelector("#addLeaveSeasonDialog").close();
 });
 
 adminLogoutBtn.addEventListener("click", () => {
@@ -3679,6 +3878,8 @@ closeVacationHistoryDialog.addEventListener("click", () => {
   }
 });
 
+document.querySelector("#closeRetiredVacationDialog").addEventListener("click", () => document.querySelector("#retiredVacationDialog").close());
+
 window.addEventListener(
   "touchstart",
   (event) => {
@@ -3731,10 +3932,12 @@ updateAdminUi();
 render();
 setActivePage("home");
 loadRemoteData();
+restoreAdminSession();
 
-window.addEventListener("focus", loadRemoteData);
+window.addEventListener("focus", () => { loadRemoteData(); restoreAdminSession(); });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     loadRemoteData();
+    restoreAdminSession();
   }
 });
